@@ -1,0 +1,117 @@
+Certificate:
+    Data:
+        Version: 3 (0x2)
+        Serial Number:
+            03:ff:71:e1:a2:dc:36:5c:34:22:e3:c9:e3:8f:c6:c0
+        Signature Algorithm: sha256WithRSAEncryption
+        Issuer: C=US, ST=Nevada, L=Carson City, O=TYS LLC, OU=Admin, CN=TYSClient/emailAddress=dev@tys.sh
+        Validity
+            Not Before: Apr 25 10:13:14 2025 GMT
+            Not After : Apr 25 10:13:14 2026 GMT
+        Subject: C=US, ST=Nevada, L=Carson City, O=TYS LLC, OU=Admin, CN=cjpc/emailAddress=dev@tys.sh
+        Subject Public Key Info:
+            Public Key Algorithm: id-ecPublicKey
+                Public-Key: (384 bit)
+                pub:
+                    04:41:35:b0:9e:5a:72:b9:fb:c7:9f:d1:b2:20:f0:
+                    ed:78:2c:4f:31:d5:1f:21:03:79:10:2d:cd:21:f7:
+                    ef:73:f6:b7:4a:0f:8d:99:af:29:52:b6:74:93:20:
+                    5c:ab:31:5f:54:30:e7:eb:2a:f7:7f:4f:a6:ca:04:
+                    e5:b1:de:89:3c:8c:d0:fb:a7:d7:79:0f:82:f7:a0:
+                    b3:a1:a4:34:d2:37:42:60:76:b3:f9:99:72:84:ba:
+                    2f:35:c9:d4:ef:03:b7
+                ASN1 OID: secp384r1
+                NIST CURVE: P-384
+        X509v3 extensions:
+            X509v3 CRL Distribution Points: 
+                Full Name:
+                  URI:https://pki.tys.sh/tysclient/ca.crl
+                Full Name:
+                  URI:https://cdn.tyss.io/pki/tysclient/ca.crl
+            Authority Information Access: 
+                CA Issuers - URI:https://pki.tys.sh/tysserver/ca.crt
+                CA Issuers - URI:https://cdn.tyss.io/pki/tysserver/ca.crt
+                OCSP - URI:https://pki.tys.sh/tysclient/ocsp
+                OCSP - URI:https://cdn.tyss.io/pki/tysclient/ocsp
+            X509v3 Basic Constraints: critical
+                CA:FALSE
+            X509v3 Subject Key Identifier: 
+                58:5E:83:5D:67:39:12:6E:E1:96:E7:19:30:BA:BB:1D:1D:29:86:FA
+            X509v3 Authority Key Identifier: 
+                keyid:E9:9C:DA:54:8C:77:0E:CF:CD:D1:DC:32:CB:6F:EB:9C:65:7F:38:E9
+                DirName:/C=US/ST=Nevada/L=Carson City/O=TYS LLC/OU=Host/CN=TYSServer/emailAddress=host@tys.sh
+                serial:DD:0A:C8:48:A3:6B:A1:F0:74:0F:64:57:AB:EA:34:5E
+            X509v3 Extended Key Usage: 
+                TLS Web Client Authentication
+            X509v3 Key Usage: critical
+                Digital Signature, Key Encipherment
+            X509v3 Subject Alternative Name: 
+                DNS:cjpc.tys.sh, IP Address:10.0.0.4
+    Signature Algorithm: sha256WithRSAEncryption
+    Signature Value:
+        51:4e:ee:ce:e0:50:85:da:21:7a:9b:95:90:07:f8:8c:cc:6a:
+        08:c9:5a:4f:08:d3:eb:0f:ad:74:5b:e1:57:be:f8:c3:03:34:
+        06:2e:3a:19:87:72:55:9e:57:37:52:5a:65:ef:dc:b0:7d:fc:
+        04:9f:2a:6d:3d:7e:32:ab:97:ff:e1:cc:37:4c:73:ab:ed:02:
+        6f:5e:f1:39:3b:5f:83:9f:d0:07:61:19:40:98:18:81:98:5b:
+        f6:33:48:bf:df:35:d3:d8:82:40:f6:11:f2:99:72:f2:1b:f3:
+        4b:41:24:2c:ab:c6:e7:39:f0:31:5c:14:3e:19:8c:fb:f7:d6:
+        2b:79:ea:cd:93:86:55:82:0a:c2:1a:ee:a5:70:90:02:b8:95:
+        6b:ae:ec:c2:53:00:b1:71:76:8c:cc:6a:43:d5:bb:d2:e1:65:
+        3e:0e:5c:2e:21:8f:be:59:58:64:50:19:2a:ef:cc:3d:ec:26:
+        c1:41:f7:c4:c6:5a:69:80:8c:59:55:55:45:42:4b:ea:28:84:
+        11:78:82:ea:8d:26:ae:71:96:5c:13:66:5c:04:f1:d5:cd:0f:
+        12:e2:51:b8:ed:93:e6:3d:a9:3a:81:b8:d3:ae:43:57:32:70:
+        e3:7d:45:9b:f8:f0:65:ef:ff:c9:1c:a7:ca:e6:33:3a:c8:31:
+        0d:7e:ce:3e:95:23:2f:96:4d:3a:87:78:98:21:47:9c:25:d9:
+        91:99:a4:b2:10:e6:48:29:3d:1e:17:6c:2f:aa:75:7b:70:24:
+        00:13:f2:e6:ed:3a:22:9b:d2:06:1e:1d:e1:aa:8d:37:35:58:
+        b2:f7:fe:12:b1:45:39:97:b7:df:54:52:b0:33:4c:a1:ea:e4:
+        bb:8d:3f:be:d5:f0:c6:69:36:11:2f:c1:9d:ac:ff:2f:f4:d3:
+        7a:96:e3:0f:30:8f:56:a3:2a:1c:d2:1b:5c:7d:d9:43:85:b0:
+        e1:95:8c:19:24:fb:84:c3:3e:fe:ce:96:2c:1a:aa:3b:87:d2:
+        38:a7:a5:30:30:80:5b:1c:90:47:f2:cf:46:49:5e:4e:af:47:
+        f4:76:b8:3c:22:9b:6e:38:0e:e9:6d:5c:85:a4:76:e6:5a:4b:
+        fa:bb:84:31:29:21:fe:e5:27:cb:57:5d:2d:fb:70:e9:c3:7a:
+        17:51:65:2e:50:4b:de:3b:62:8d:a4:2f:bc:68:00:65:60:b9:
+        77:06:2d:34:17:ef:0f:53:09:13:69:af:cb:db:3d:5a:a7:d2:
+        fe:16:ef:f6:bd:a0:83:f8:a6:2f:c1:3b:07:5c:9f:bd:c5:76:
+        40:03:7c:10:fc:e4:50:b2:58:56:d0:14:24:05:c0:1c:cd:96:
+        c1:09:21:25:f0:95:36:2c
+-----BEGIN CERTIFICATE-----
+MIIGYTCCBEmgAwIBAgIQA/9x4aLcNlw0IuPJ44/GwDANBgkqhkiG9w0BAQsFADCB
+hTELMAkGA1UEBhMCVVMxDzANBgNVBAgMBk5ldmFkYTEUMBIGA1UEBwwLQ2Fyc29u
+IENpdHkxEDAOBgNVBAoMB1RZUyBMTEMxDjAMBgNVBAsMBUFkbWluMRIwEAYDVQQD
+DAlUWVNDbGllbnQxGTAXBgkqhkiG9w0BCQEWCmRldkB0eXMuc2gwHhcNMjUwNDI1
+MTAxMzE0WhcNMjYwNDI1MTAxMzE0WjCBgDELMAkGA1UEBhMCVVMxDzANBgNVBAgM
+Bk5ldmFkYTEUMBIGA1UEBwwLQ2Fyc29uIENpdHkxEDAOBgNVBAoMB1RZUyBMTEMx
+DjAMBgNVBAsMBUFkbWluMQ0wCwYDVQQDDARjanBjMRkwFwYJKoZIhvcNAQkBFgpk
+ZXZAdHlzLnNoMHYwEAYHKoZIzj0CAQYFK4EEACIDYgAEQTWwnlpyufvHn9GyIPDt
+eCxPMdUfIQN5EC3NIffvc/a3Sg+Nma8pUrZ0kyBcqzFfVDDn6yr3f0+mygTlsd6J
+PIzQ+6fXeQ+C96CzoaQ00jdCYHaz+ZlyhLovNcnU7wO3o4ICfDCCAngwZAYDVR0f
+BF0wWzApoCegJYYjaHR0cHM6Ly9wa2kudHlzLnNoL3R5c2NsaWVudC9jYS5jcmww
+LqAsoCqGKGh0dHBzOi8vY2RuLnR5c3MuaW8vcGtpL3R5c2NsaWVudC9jYS5jcmww
+gdoGCCsGAQUFBwEBBIHNMIHKMC8GCCsGAQUFBzAChiNodHRwczovL3BraS50eXMu
+c2gvdHlzc2VydmVyL2NhLmNydDA0BggrBgEFBQcwAoYoaHR0cHM6Ly9jZG4udHlz
+cy5pby9wa2kvdHlzc2VydmVyL2NhLmNydDAtBggrBgEFBQcwAYYhaHR0cHM6Ly9w
+a2kudHlzLnNoL3R5c2NsaWVudC9vY3NwMDIGCCsGAQUFBzABhiZodHRwczovL2Nk
+bi50eXNzLmlvL3BraS90eXNjbGllbnQvb2NzcDAMBgNVHRMBAf8EAjAAMB0GA1Ud
+DgQWBBRYXoNdZzkSbuGW5xkwursdHSmG+jCBwgYDVR0jBIG6MIG3gBTpnNpUjHcO
+z83R3DLLb+ucZX846aGBi6SBiDCBhTELMAkGA1UEBhMCVVMxDzANBgNVBAgMBk5l
+dmFkYTEUMBIGA1UEBwwLQ2Fyc29uIENpdHkxEDAOBgNVBAoMB1RZUyBMTEMxDTAL
+BgNVBAsMBEhvc3QxEjAQBgNVBAMMCVRZU1NlcnZlcjEaMBgGCSqGSIb3DQEJARYL
+aG9zdEB0eXMuc2iCEQDdCshIo2uh8HQPZFer6jReMBMGA1UdJQQMMAoGCCsGAQUF
+BwMCMA4GA1UdDwEB/wQEAwIFoDAcBgNVHREEFTATggtjanBjLnR5cy5zaIcECgAA
+BDANBgkqhkiG9w0BAQsFAAOCAgEAUU7uzuBQhdohepuVkAf4jMxqCMlaTwjT6w+t
+dFvhV774wwM0Bi46GYdyVZ5XN1JaZe/csH38BJ8qbT1+MquX/+HMN0xzq+0Cb17x
+OTtfg5/QB2EZQJgYgZhb9jNIv98109iCQPYR8ply8hvzS0EkLKvG5znwMVwUPhmM
++/fWK3nqzZOGVYIKwhrupXCQAriVa67swlMAsXF2jMxqQ9W70uFlPg5cLiGPvllY
+ZFAZKu/MPewmwUH3xMZaaYCMWVVVRUJL6iiEEXiC6o0mrnGWXBNmXATx1c0PEuJR
+uO2T5j2pOoG4065DVzJw431Fm/jwZe//yRynyuYzOsgxDX7OPpUjL5ZNOod4mCFH
+nCXZkZmkshDmSCk9HhdsL6p1e3AkABPy5u06IpvSBh4d4aqNNzVYsvf+ErFFOZe3
+31RSsDNMoerku40/vtXwxmk2ES/Bnaz/L/TTepbjDzCPVqMqHNIbXH3ZQ4Ww4ZWM
+GST7hMM+/s6WLBqqO4fSOKelMDCAWxyQR/LPRkleTq9H9Ha4PCKbbjgO6W1chaR2
+5lpL+ruEMSkh/uUny1ddLftw6cN6F1FlLlBL3jtijaQvvGgAZWC5dwYtNBfvD1MJ
+E2mvy9s9WqfS/hbv9r2gg/imL8E7B1yfvcV2QAN8EPzkULJYVtAUJAXAHM2WwQkh
+JfCVNiw=
+-----END CERTIFICATE-----

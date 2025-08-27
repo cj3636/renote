@@ -1,0 +1,7 @@
+{
+  "name": "tys/pnotes",
+  "type": "project",
+  "require": { "predis/predis": "^2.3" },
+  "autoload": { "psr-4": { "": "." } }
+}
+
