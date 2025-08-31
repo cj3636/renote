@@ -11,7 +11,8 @@ if (empty($state['cards'])) {
     redis_upsert_card($id, $welcome, 0);
     $state = load_state();
 }
-?><!doctype html>
+?>
+<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
@@ -21,36 +22,14 @@ if (empty($state['cards'])) {
 <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-<script>
-  window.__INITIAL_STATE__ = <?php echo json_encode($state, JSON_UNESCAPED_SLASHES); ?>;
+<script id="bootstrap" type="application/json">
+<?= safe_json_for_script($state) . "\n" ?>
 </script>
 <div id="app">
-  <header class="topbar">
-    <h1>Card Notes</h1>
-  <button id="addCardBtn" class="icon-btn" title="Add card" aria-label="Add card">+</button>
-  <?php if (defined('APP_DEBUG') && APP_DEBUG): ?>
-  <button id="flushBtn" class="icon-btn" title="Flush pending changes" aria-label="Flush" style="margin-left:4px;">⟳</button>
-  <?php endif; ?>
-    <div id="health" class="health-indicator" title="System health">
-      <span id="healthDot" class="health-dot health-pulse"></span>
-    </div>
-  </header>
+  <?php require_once __DIR__ . '/partials/header.php'; ?>
   <main class="grid" id="grid" aria-live="polite" aria-busy="false"></main>
 </div>
-<div id="modal" class="modal hidden" aria-hidden="true" role="dialog" aria-modal="true">
-  <div class="backdrop" data-close="1"></div>
-  <div class="dialog" role="document">
-    <div class="dialog-header">
-      <div class="drag-hint">✥</div>
-      <div class="spacer"></div>
-      <button class="icon-btn close" id="closeModal" aria-label="Close">×</button>
-    </div>
-    <textarea id="editor" placeholder="Type your note…"></textarea>
-    <div class="dialog-actions">
-      <button class="trash icon-btn" id="trashBtn" aria-label="Delete">🗑</button>
-    </div>
-  </div>
-</div>
+<?php require_once __DIR__ . '/partials/modal.php'; ?>
 <script src="modern.store.min.js"></script>
 <script src="app.js" type="module"></script>
 <script type="module">
