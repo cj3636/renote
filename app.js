@@ -1,54 +1,66 @@
-// Simple SPA logic: grid, modal, drag-reorder, instant local save + efficient server sync.
-// Duplicate legacy fragment removed and unified on 'text' field.
+// ===== Boot state safely from JSON script tag =====
+const bootEl = document.getElementById('bootstrap');
+let serverState = {};
+try { serverState = JSON.parse(bootEl?.textContent || '{}'); } catch {}
+let state = store.get('cards_state', null) || serverState || {cards:[], updated_at:0};
+state.cards ||= [];
 
 const grid = document.getElementById('grid');
 const addBtn = document.getElementById('addCardBtn');
 const modal = document.getElementById('modal');
-const backdrop = modal.querySelector('.backdrop');
-const closeModalBtn = document.getElementById('closeModal');
+const backdrop = modal?.querySelector('.backdrop');
+const nameInput = document.getElementById('nameInput');
 const editor = document.getElementById('editor');
+const closeModalBtn = document.getElementById('closeModal');
 const trashBtn = document.getElementById('trashBtn');
+const fullscreenBtn = document.getElementById('fullscreenBtn');
+
+const historyBtn = document.getElementById('historyBtn');
+const drawer = document.getElementById('historyDrawer');
+const closeHistory = document.getElementById('closeHistory');
+const historyList = document.getElementById('historyList');
+
+const flushBtn = document.getElementById('flushBtn');
 
 const API = {
   state: () => fetch('api.php?action=state').then(r=>r.json()),
-  saveCard: (card) => fetch('api.php?action=save_card', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(card) }).then(r=>r.json()),
+  saveCard: (card) => fetch('api.php?action=save_card', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(card)}).then(r=>r.json()),
+  deleteCard: (id) => fetch('api.php?action=delete_card', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id})}).then(r=>r.json()),
   bulkSave: (cards) => navigator.sendBeacon
     ? navigator.sendBeacon('api.php?action=bulk_save', new Blob([JSON.stringify({cards})], {type:'application/json'}))
-    : fetch('api.php?action=bulk_save', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({cards}) })
+    : fetch('api.php?action=bulk_save', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({cards}) }),
+  flushOnce: () => fetch('api.php?action=flush_once', {cache:'no-store'}).then(r=>r.json()),
+  history: () => fetch('api.php?action=history', {cache:'no-store'}).then(r=>r.json()),
+  historyPurge: (id)=> fetch('api.php?action=history_purge',{method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id})}).then(r=>r.json()),
+  historyRestore: (id)=> fetch('api.php?action=history_restore',{method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id})}).then(r=>r.json()),
 };
 
-const uid = () => (crypto?.randomUUID?.() || ([1e7]+-1e3+-4e3+-8e3+-1e11)).toString();
-
-const firstSentence = (t) => {
-  if (!t) return '';
-  const m = t.match(/[^.!?]*[.!?]/);
-  return (m ? m[0] : t).trim();
-};
-
-const debounce = (fn, ms=400) => {
-  let t;
-  return (...args) => { clearTimeout(t); t = setTimeout(()=>fn(...args), ms); };
-};
-
-let state = store.get('cards_state', null) || window.__INITIAL_STATE__ || {cards:[]};
-state.cards = state.cards || [];
+const uid = () => crypto.randomUUID?.() || (Date.now().toString(36)+Math.random().toString(36).slice(2));
+const firstSentence = (t) => { if (!t) return ''; const m = t.match(/[^.!?]*[.!?]/); return (m?m[0]:t).trim(); };
+const debounce = (fn, ms=400)=>{ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), ms); }; };
+const serverSaveDebounced = debounce((card)=> API.saveCard(card), 450);
 
 let currentId = null;
 let trashArmed = false;
 
-// Render
+// ===== Render grid =====
 function render() {
   grid.innerHTML = '';
   state.cards.sort((a,b)=>a.order-b.order).forEach(card => {
     const el = document.createElement('div');
     el.className = 'card';
-    el.setAttribute('draggable', 'true');
     el.dataset.id = card.id;
 
     const handle = document.createElement('div');
     handle.className = 'card-handle';
-    handle.title = 'Drag to reorder';
-    handle.textContent = '⋮⋮';
+    const grab = document.createElement('div');
+    grab.className = 'grab';
+    grab.textContent = '⋮⋮';
+    grab.title = 'Drag';
+    const title = document.createElement('div');
+    title.className = 'title';
+    title.textContent = (card.name || '').trim() || '—';
+    handle.append(grab, title);
 
     const blurb = document.createElement('div');
     blurb.className = 'card-blurb';
@@ -58,30 +70,16 @@ function render() {
     el.appendChild(blurb);
     grid.appendChild(el);
 
-    // Click to open modal (ignore if dragging)
-    let moved = false;
-    el.addEventListener('mousedown', ()=>{ moved = false; }, { passive:true });
-    el.addEventListener('mousemove', ()=>{ moved = true; }, { passive:true });
-    el.addEventListener('click', (e) => {
-      if (moved) return;
-      openModal(card.id);
-    });
+    // Clicking anywhere except the grab opens modal
+    handle.addEventListener('click', (e)=> { if (e.target === grab) return; openModal(card.id); });
+    blurb.addEventListener('click', ()=> openModal(card.id));
 
-    // Drag & drop reorder (drag only from handle)
-    el.addEventListener('dragstart', (e) => {
-      if (!e.target.closest('.card-handle')) { e.preventDefault(); return; }
-      e.dataTransfer.setData('text/plain', card.id);
-      el.classList.add('dragging');
-    });
-    el.addEventListener('dragend', ()=> el.classList.remove('dragging'));
-
-    el.addEventListener('dragover', (e) => {
-      e.preventDefault();
-      const srcId = e.dataTransfer.getData('text/plain');
-      const tgtId = card.id;
-      if (!srcId || srcId === tgtId) return;
-      reorder(srcId, tgtId);
-    });
+    // DnD strictly on grab
+    let dragId=null;
+    grab.setAttribute('draggable','true');
+    grab.addEventListener('dragstart', (e)=> { dragId = card.id; e.dataTransfer.setData('text/plain', dragId); });
+    el.addEventListener('dragover', (e)=> { e.preventDefault(); const srcId = dragId || e.dataTransfer.getData('text/plain'); if (!srcId || srcId===card.id) return; reorder(srcId, card.id); });
+    grab.addEventListener('dragend', ()=> dragId=null);
   });
 }
 
@@ -89,125 +87,145 @@ function reorder(srcId, tgtId) {
   const cards = state.cards;
   const srcIdx = cards.findIndex(c=>c.id===srcId);
   const tgtIdx = cards.findIndex(c=>c.id===tgtId);
-  if (srcIdx < 0 || tgtIdx < 0 || srcIdx === tgtIdx) return;
-  const [moved] = cards.splice(srcIdx, 1);
-  cards.splice(tgtIdx, 0, moved);
+  if (srcIdx<0 || tgtIdx<0 || srcIdx===tgtIdx) return;
+  const [moved] = cards.splice(srcIdx,1);
+  cards.splice(tgtIdx,0,moved);
   cards.forEach((c,i)=>c.order=i);
   saveLocal();
-  queueServerSave(moved); // save at least the moved card (order)
+  queueServerSave(moved);
   render();
 }
 
-// Modal controls
+// ===== Modal =====
 function openModal(id) {
   currentId = id;
   const card = state.cards.find(c=>c.id===id);
   if (!card) return;
   editor.value = card.text || '';
+  nameInput.value = (card.name || '').trim();
   modal.classList.remove('hidden');
-  modal.setAttribute('aria-hidden', 'false');
+  modal.setAttribute('aria-hidden','false');
   editor.focus();
-  trashBtn.classList.remove('armed');
-  trashArmed = false;
+  trashBtn.classList.remove('armed'); trashArmed=false;
 }
 function closeModal() {
   currentId = null;
   modal.classList.add('hidden');
-  modal.setAttribute('aria-hidden', 'true');
-  trashBtn.classList.remove('armed');
-  trashArmed = false;
+  modal.setAttribute('aria-hidden','true');
+  modal.classList.remove('fullscreen');
+  trashBtn.classList.remove('armed'); trashArmed=false;
 }
-
-backdrop.addEventListener('click', (e)=> { if (e.target.dataset.close) closeModal(); });
-closeModalBtn.addEventListener('click', closeModal);
+backdrop?.addEventListener('click', (e)=> { if (e.target.dataset.close) closeModal(); });
+closeModalBtn?.addEventListener('click', closeModal);
 document.addEventListener('keydown', (e)=>{ if (e.key==='Escape' && !modal.classList.contains('hidden')) closeModal(); });
 
-// Double-prompt trash button
-trashBtn.addEventListener('click', () => {
-  if (!currentId) return;
-  if (!trashArmed) {
-    trashArmed = true;
-    trashBtn.classList.add('armed'); // turn red
-    setTimeout(()=>{ trashArmed=false; trashBtn.classList.remove('armed'); }, 2500);
-    return;
-  }
-  // Confirmed second click within window
-  deleteCard(currentId);
-  closeModal();
+fullscreenBtn?.addEventListener('click', ()=> {
+  modal.classList.toggle('fullscreen');
 });
 
-function deleteCard(id) {
-  state.cards = state.cards.filter(c=>c.id!==id).map((c,i)=>({ ...c, order:i }));
-  saveLocal();
-  fetch('api.php?action=delete_card', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id})});
-  render();
-}
-
-// Add card
-addBtn.addEventListener('click', () => {
-  const id = uid();
-  const order = state.cards.length;
-  const card = { id, text: '', order };
-  state.cards.push(card);
-  saveLocal();
-  // Create on server quickly
-  API.saveCard(card);
-  render();
-  // Open editor right away
-  setTimeout(()=>openModal(id), 0);
-});
-
-// Editor input: instant local save + efficient server save (debounced)
-const serverSaveDebounced = debounce((card) => API.saveCard(card), 450);
-
-editor.addEventListener('input', () => {
+// Save text on input
+editor?.addEventListener('input', ()=>{
   if (!currentId) return;
   const card = state.cards.find(c=>c.id===currentId);
-  if (!card) return;
   card.text = editor.value;
   saveLocal();
   queueServerSave(card);
-  // Update blurb live
   const el = grid.querySelector(`.card[data-id="${card.id}"] .card-blurb`);
   if (el) el.textContent = firstSentence(card.text) || '…';
 });
 
-function queueServerSave(card) {
-  serverSaveDebounced({ id: card.id, text: card.text, order: card.order|0 });
-}
-
-function saveLocal() { store.set('cards_state', state); }
-
-// Persist everything on unload as a safety net
-window.addEventListener('beforeunload', () => {
-  try { API.bulkSave(state.cards); } catch(e){}
+// Save name on blur & Enter
+nameInput?.addEventListener('keydown', (e)=> {
+  if (e.key==='Enter') { e.preventDefault(); nameInput.blur(); }
+});
+nameInput?.addEventListener('blur', ()=>{
+  if (!currentId) return;
+  const card = state.cards.find(c=>c.id===currentId);
+  const val = nameInput.value.trim();
+  card.name = val;
+  saveLocal();
+  queueServerSave(card);
+  const t = grid.querySelector(`.card[data-id="${card.id}"] .card-handle .title`);
+  if (t) t.textContent = val || '—';
 });
 
-// Boot: prefer local (for offline + instant), merge/replace from server if newer.
-async function boot() {
-  // If no local, load server
-  if (!store.get('cards_state')) {
-    state = await API.state();
-    store.set('cards_state', state);
-  } else {
-    // Try to pull server and choose the newer
-    try {
-      const remote = await API.state();
-      const local = store.get('cards_state');
-      const r = +remote.updated_at || 0;
-      const l = +local.updated_at || 0;
-      state = (r > l) ? remote : local;
-      store.set('cards_state', state);
-    } catch(e) {
-      state = store.get('cards_state');
-    }
+// Double-prompt trash
+trashBtn?.addEventListener('click', ()=>{
+  if (!currentId) return;
+  if (!trashArmed) {
+    trashArmed = true; trashBtn.classList.add('armed');
+    setTimeout(()=>{ trashArmed=false; trashBtn.classList.remove('armed'); }, 2500);
+    return;
   }
-  // Guarantee at least one card
-  if (!state.cards || state.cards.length===0) {
-    state.cards = [{ id: uid(), text: '', order:0 }];
-    saveLocal();
-    API.saveCard(state.cards[0]);
-  }
-  render();
+  // Soft delete (Redis only)
+  const id = currentId;
+  closeModal();
+  state.cards = state.cards.filter(c=>c.id!==id).map((c,i)=>({ ...c, order:i }));
+  saveLocal(); render();
+  API.deleteCard(id);
+});
+
+// Add card
+addBtn?.addEventListener('click', ()=>{
+  const id = uid(); const order = state.cards.length;
+  const card = { id, name:'', text:'', order, updated_at: Date.now()/1000|0 };
+  state.cards.push(card); saveLocal(); render(); queueServerSave(card);
+  setTimeout(()=>openModal(id), 0);
+});
+
+function queueServerSave(card) {
+  serverSaveDebounced({ id: card.id, name: card.name||'', text: card.text, order: card.order|0 });
 }
-boot();
+function saveLocal(){ store.set('cards_state', state); }
+
+// Safety net
+window.addEventListener('beforeunload', ()=> { try{ API.bulkSave(state.cards); }catch{} });
+
+// ===== Flush & Health =====
+flushBtn?.addEventListener('click', async ()=>{
+  flushBtn.disabled = true;
+  try {
+    const res = await API.flushOnce();
+    const msg = `Flushed: ${res.flushed}\nUpserts: ${res.stats?.upserts||0}\nPurges: ${res.stats?.purges||0}\nPruned empty: ${res.stats?.skipped_empty||0}`;
+    alert(msg);
+  } catch(e) { alert('Flush failed'); }
+  flushBtn.disabled = false;
+});
+
+// ===== History drawer =====
+historyBtn?.addEventListener('click', async ()=>{
+  try{
+    const {orphans=[]} = await API.history();
+    historyList.innerHTML = '';
+    if (!orphans.length) {
+      historyList.textContent = 'No DB-only cards found.';
+    } else {
+      orphans.forEach(o=>{
+        const row = document.createElement('div');
+        row.className='history-row';
+        const name = (o.name||'').trim() || '—';
+        const preview = (o.txt||'').slice(0,120).replace(/\s+/g,' ');
+        row.innerHTML = `
+          <div><strong>${name}</strong> <code>${o.id}</code></div>
+          <div class="muted">${preview}</div>
+          <div class="row-actions">
+            <button class="icon-btn restore" data-id="${o.id}">Restore</button>
+            <button class="icon-btn danger purge" data-id="${o.id}">Purge</button>
+          </div>`;
+        historyList.appendChild(row);
+      });
+      historyList.querySelectorAll('.restore').forEach(b=> b.addEventListener('click', async(e)=>{
+        const id = e.currentTarget.dataset.id; await API.historyRestore(id); alert('Restored '+id);
+      }));
+      historyList.querySelectorAll('.purge').forEach(b=> b.addEventListener('click', async(e)=>{
+        const id = e.currentTarget.dataset.id; if (!confirm('Permanently delete?')) return;
+        await API.historyPurge(id); alert('Purged '+id);
+      }));
+    }
+    drawer.classList.remove('hidden'); drawer.setAttribute('aria-hidden','false');
+  }catch{ alert('History load failed'); }
+});
+closeHistory?.addEventListener('click', ()=>{ drawer.classList.add('hidden'); drawer.setAttribute('aria-hidden','true'); });
+
+// ===== Initial render =====
+render();

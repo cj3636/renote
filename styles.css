@@ -124,3 +124,29 @@ body {
 }
 .trash { background: #141b28; }
 .trash.armed { background: var(--danger); border-color: #ff9aa9; }
+.name-input {
+  background: transparent; border: 1px dashed var(--border);
+  color: var(--text); border-radius: 8px; padding: 6px 10px; text-align: center;
+  min-width: 40%; outline: none;
+}
+.name-input:focus { border-color: var(--accent); }
+
+.fullscreen .dialog { width: 96vw; height: 92vh; }
+.fullscreen #editor { height: calc(92vh - 120px); min-height: 0; resize: none; }
+
+.drawer { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; }
+.drawer.hidden { display: none; }
+.drawer-panel { width: min(900px, 92vw); max-height: 80vh; overflow: auto; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow); }
+.drawer-header { display:flex; align-items:center; justify-content: space-between; padding:10px 12px; border-bottom:1px solid var(--border); }
+.drawer-body { padding: 8px 12px; }
+
+.card-handle {
+  padding: 8px 10px;
+  display:flex; align-items:center; gap:8px;
+  background: #0f1622;
+  border-bottom: 1px solid var(--border);
+  border-top-left-radius: var(--radius);
+  border-top-right-radius: var(--radius);
+}
+.card-handle .grab { cursor: grab; font-weight:700; color:#6b7fa8; }
+.card-handle .title { flex:1; text-align:center; color:var(--text); opacity:.9; }
