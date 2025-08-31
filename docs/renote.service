@@ -1,0 +1,34 @@
+# /etc/systemd/system/renote.service
+[Unit]
+Description=Flush Redis notes to MariaDB (oneshot)
+After=network.target redis-server.service mariadb.service php-fpm.service
+Wants=redis-server.service mariadb.service php-fpm.service
+# Make sure project path exists before starting
+ConditionPathIsDirectory=/var/www/renote
+
+[Service]
+Type=oneshot
+User=www-data
+Group=www-data
+SupplementaryGroups=redis
+WorkingDirectory=/var/www/renote
+ExecStart=/usr/bin/php /var/www/renote/flush.php --once --quiet
+TimeoutStartSec=20
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+LockPersonality=true
+RestrictNamespaces=true
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallFilter=@system-service
+UMask=0077                   # prevent accidental world-readable files
+
+StandardOutput=journal
+StandardError=journal

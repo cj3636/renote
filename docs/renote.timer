@@ -1,0 +1,13 @@
+# /etc/systemd/system/renote.timer
+[Unit]
+Description=Timer for renote (frequent write-behind)
+
+[Timer]
+OnBootSec=20s
+OnUnitActiveSec=180s
+#RandomizedDelaySec=1
+Unit=renote.service
+Persistent=true            # catch up missed runs after reboot/sleep
+
+[Install]
+WantedBy=timers.target
