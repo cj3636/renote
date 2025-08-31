@@ -25,6 +25,7 @@ switch ($action) {
         $id = $in['id'] ?? null;
         $text = $in['text'] ?? '';
         $order = isset($in['order']) ? (int)$in['order'] : 0;
+        $name  = isset($in['name']) ? (string)$in['name'] : '';
         if (!$id) fail('id required');
         $updated_at = redis_upsert_card($id, $text, $order);
         ok(['id' => $id, 'text' => $text, 'order' => $order, 'updated_at' => $updated_at]);
@@ -43,11 +44,13 @@ switch ($action) {
         ok(['updated_at' => $lastUpdated]);
         break;
     case 'delete_card':
+        // Old delete from redis + db func
+        //delete_card_everywhere($id);
         $in = json_input();
         $id = $in['id'] ?? null;
         if (!$id) fail('id required');
-        delete_card_everywhere($id);
-        ok(['id' => $id]);
+        delete_card_redis_only($id);
+        ok(['id'=>$id]);
         break;
     case 'health':
         $r = redis_client();
@@ -70,9 +73,9 @@ switch ($action) {
             }
             $lag = $pending;
         } catch (Throwable $e) {}
-    $okLag = defined('APP_WORKER_MIN_OK_LAG') ? APP_WORKER_MIN_OK_LAG : 20;
-    $degLag = defined('APP_WORKER_MIN_DEGRADED_LAG') ? APP_WORKER_MIN_DEGRADED_LAG : 200;
-    $status = ($lag < $okLag) ? 'ok' : (($lag < $degLag) ? 'degraded' : 'backlog');
+        $okLag = defined('APP_WORKER_MIN_OK_LAG') ? APP_WORKER_MIN_OK_LAG : 20;
+        $degLag = defined('APP_WORKER_MIN_DEGRADED_LAG') ? APP_WORKER_MIN_DEGRADED_LAG : 200;
+        $status = ($lag < $okLag) ? 'ok' : (($lag < $degLag) ? 'degraded' : 'backlog');
         $lastFlushTs = (int)$r->get(REDIS_LAST_FLUSH_TS);
         $sinceFlush = $lastFlushTs ? (time() - $lastFlushTs) : null;
         // In batch mode tolerate larger lag if still within interval
@@ -94,8 +97,8 @@ switch ($action) {
     case 'flush_once':
         if (!defined('APP_WRITE_BEHIND') || !APP_WRITE_BEHIND) fail('write-behind disabled', 400);
         // Run worker logic one batch (reuse worker functions) by including worker file
-        require_once __DIR__ . '/flush_redis_to_db.php'; // will exit if disabled; functions already loaded otherwise
-        // flush_redis_to_db.php runs immediately; but we only want a single batch. Instead replicate minimal logic here.
+        require_once __DIR__ . '/flush.php'; // will exit if disabled; functions already loaded otherwise
+        // flush.php runs immediately; but we only want a single batch. Instead replicate minimal logic here.
         $r = redis_client();
         $lastId = $r->get(REDIS_STREAM_LAST) ?: '0-0';
         // If backlog large, pull bigger batch (adaptive)
@@ -118,7 +121,10 @@ switch ($action) {
             $r->set(REDIS_STREAM_LAST, $newLast);
             $r->set(REDIS_LAST_FLUSH_TS, time());
         }
-        ok(['flushed' => $processed]);
+        worker_commit_pending();
+        $r->set(REDIS_STREAM_LAST, $newLast);
+        $r->set(REDIS_LAST_FLUSH_TS, time());
+        ok(['flushed'=>$processed, 'stats'=>$stats]);
         break;
     case 'trim_stream':
         if (!defined('APP_WRITE_BEHIND') || !APP_WRITE_BEHIND) fail('write-behind disabled', 400);
@@ -134,6 +140,29 @@ switch ($action) {
         $r->del([REDIS_INDEX_KEY]);
         ok();
         break;
+    case 'history':
+      $orphans = db_orphans(); // rows in DB not in Redis
+      ok(['orphans'=>$orphans]);
+      break;
+    case 'history_purge':
+      $in = json_input();
+      $id = $in['id'] ?? null;
+      if (!$id) fail('id required');
+      _db_delete_card($id);
+      ok(['purged'=>$id]);
+      break;
+    case 'history_restore':
+      $in = json_input();
+      $id = $in['id'] ?? null;
+      if (!$id) fail('id required');
+      // Pull row and rehydrate to Redis
+      $stmt = db()->prepare("SELECT id, name, txt, `order`, updated_at FROM cards WHERE id=?");
+      $stmt->execute([$id]);
+      $row = $stmt->fetch();
+      if (!$row) fail('not found',404);
+      redis_upsert_card($row['id'], $row['txt'], (int)$row['order'], $row['name'] ?? '');
+      ok(['restored'=>$id]);
+      break;
     default:
         fail('unknown action');
 }
