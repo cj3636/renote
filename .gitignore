@@ -1,0 +1,50 @@
+# Core ignores
+vendor/                  # Composer dependencies
+node_modules/            # (if you add any frontend build tooling)
+
+/.env                     # Environment variables, secrets
+config.php                # DB/Redis config with credentials
+*.ini                     # Local config files
+*.log                     # Logs
+*.pid
+*.sock
+*.swp
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+*.lock
+composer.lock
+package-lock.json
+yarn.lock
+
+# Local runtime data
+vendor/
+cards.json
+cards.lock
+#*.json
+data/
+*.sqlite
+
+# IDE/editor
+#.idea/
+#.vscode/
+#*.iml
+
+# Systemd
+*.service
+*.timer
+
+# OS
+ehthumbs.db
+desktop.ini
+
+# Backups
+*~
+*.bak
+*.old
+
+# Optional: ignore all secrets & SSL
+ssl/*
+!ssl/.gitkeep            # keep a placeholder
+
