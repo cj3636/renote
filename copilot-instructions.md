@@ -1,6 +1,6 @@
-# Copilot Instructions — **pnotes** (PHP + Redis + MariaDB)
+# Copilot Instructions — **renote** (PHP + Redis + MariaDB)
 
-These instructions guide an AI coding assistant ("Copilot") to build, run, and maintain the **pnotes** single‑page notes app with **per‑keystroke Redis writes** and **write‑behind flush to MariaDB**.
+These instructions guide an AI coding assistant ("Copilot") to build, run, and maintain the **renote** single‑page notes app with **per‑keystroke Redis writes** and **write‑behind flush to MariaDB**.
 
 ---
 
@@ -17,7 +17,7 @@ These instructions guide an AI coding assistant ("Copilot") to build, run, and m
 ## 1) Repository Layout
 
 ```
-pnotes/
+renote/
 ├─ index.php                 # Renders SPA and injects initial state
 ├─ api.php                   # REST API (Redis hot path + DB hydrating)
 ├─ bootstrap.php             # Predis + PDO singleton factories, helpers
@@ -29,8 +29,8 @@ pnotes/
 ├─ composer.json             # predis/predis
 ├─ public/ (optional)        # if using a public web root layout
 └─ systemd/
-   ├─ pnotes-flush.service
-   └─ pnotes-flush.timer
+   ├─ renote.service
+   └─ renote.timer
 ```
 
 ---
@@ -53,14 +53,14 @@ Create **`config.php`** with the following constants (Copilot must parameterize,
 <?php
 // Redis via UNIX socket
 const REDIS_SOCKET   = '/run/redis/redis-server.sock';
-const REDIS_USERNAME = null;                    // e.g. 'pnotes'
+const REDIS_USERNAME = null;                    // e.g. 'renote'
 const REDIS_PASSWORD = 'CHANGEME_REDIS_PASS';   // requirepass or ACL user pwd
 
 // MariaDB via UNIX socket (secure with require_secure_transport)
 const MYSQL_USE_SOCKET = true;
 const MYSQL_SOCKET     = '/run/mysqld/mysqld.sock';
-const MYSQL_DB         = 'pnotes';
-const MYSQL_USER       = 'pnoteuser';
+const MYSQL_DB         = 'renote';
+const MYSQL_USER       = 'renoteuser';
 const MYSQL_PASS       = 'CHANGEME_DB_PASS';
 
 // PDO common options
@@ -87,7 +87,7 @@ const REDIS_STREAM_LAST  = 'cards:stream:lastid';
 
 ```json
 {
-  "name": "tys/pnotes",
+  "name": "tys/renote",
   "type": "project",
   "require": { "predis/predis": "^2.3" },
   "autoload": { "psr-4": { "": "." } }
@@ -107,9 +107,9 @@ composer install --no-dev --optimize-autoloader
 Run as a privileged MariaDB user:
 
 ```sql
-CREATE DATABASE IF NOT EXISTS pnotes CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE DATABASE IF NOT EXISTS renote CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
-CREATE TABLE IF NOT EXISTS pnotes.cards (
+CREATE TABLE IF NOT EXISTS renote.cards (
   id         VARCHAR(64) PRIMARY KEY,
   txt        MEDIUMTEXT NOT NULL,
   `order`    INT NOT NULL DEFAULT 0,
@@ -179,7 +179,7 @@ All endpoints return JSON and are routed through **`api.php`**.
 
 ## 9) Flusher Worker (Redis → MariaDB)
 
-**File:** `flush_redis_to_db.php`
+**File:** `flush.php`
 
 * Must `require 'bootstrap.php';` and **`redis_client()->ping()`** to validate AUTH/socket.
 * Use **raw `XREAD`** via `executeRaw()` to avoid Predis signature pitfalls.
@@ -190,7 +190,7 @@ All endpoints return JSON and are routed through **`api.php`**.
 **systemd units** (timer-driven):
 
 ```
-# systemd/pnotes-flush.service
+# systemd/renote.service
 [Unit]
 Description=Flush Redis notes to MariaDB
 After=redis-server.service mariadb.service
@@ -200,17 +200,17 @@ Type=oneshot
 User=www-data
 Group=www-data
 SupplementaryGroups=redis
-WorkingDirectory=/var/www/pnote
-ExecStart=/usr/bin/php /var/www/pnote/flush_redis_to_db.php
+WorkingDirectory=/var/www/renote
+ExecStart=/usr/bin/php /var/www/renote/flush.php
 
-# systemd/pnotes-flush.timer
+# systemd/renote-flush.timer
 [Unit]
 Description=Flush Redis notes to MariaDB (frequent)
 
 [Timer]
 OnBootSec=10s
 OnUnitActiveSec=5s
-Unit=pnotes-flush.service
+Unit=renote-flush.service
 
 [Install]
 WantedBy=timers.target
@@ -219,9 +219,9 @@ WantedBy=timers.target
 **Enable:**
 
 ```bash
-sudo cp systemd/* /etc/systemd/system/
+sudo cp docs/renote.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now pnotes-flush.timer
+sudo systemctl enable --now renote-flush.timer
 ```
 
 ---
@@ -245,7 +245,7 @@ sudo systemctl enable --now pnotes-flush.timer
 server {
   listen 80;
   server_name cards.local;  # change to your host
-  root /var/www/pnote;      # project root
+  root /var/www/renote;      # project root
   index index.php;
 
   location / {
@@ -325,7 +325,7 @@ curl -s -X POST http://localhost/api.php?action=delete_card \
 
 * **Logs:**
 
-  * systemd journal for worker; search `pnotes-flush.service`.
+  * systemd journal for worker; search `renote-flush.service`.
   * Nginx access/error logs for API.
 * **Metrics (optional):** Add simple counters in Redis (`INCR`) for saves/deletes and expose as a debug endpoint.
 * **Backups:**
