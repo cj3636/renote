@@ -1,0 +1,10 @@
+[Unit]
+Description=Ping Renote health endpoint
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=60s
+Unit=renote-health.service
+
+[Install]
+WantedBy=timers.target
