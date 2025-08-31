@@ -31,10 +31,6 @@ data/
 #.vscode/
 #*.iml
 
-# Systemd
-*.service
-*.timer
-
 # OS
 ehthumbs.db
 desktop.ini

@@ -1,19 +1,10 @@
 <?php
-const DEV_MODE = false;
-
-//if ($DEV_MODE) {
-//  $REDIS_CONNECTION_TYPE = 'tcp';
-//  $MYSQL_USE_SOCKET = false;
-//} else {
-//  $REDIS_CONNECTION_TYPE = 'unix';
-//  $MYSQL_USE_SOCKET = true;
-//}
-
+APP_DEBUG = false;
 // --- Redis via UNIX socket ---
 const REDIS_CONNECTION_TYPE = 'unix'; // Use 'unix' for socket, 'tcp' for ip
 
 // Redis via TCP (for development)
-const REDIS_HOST = '10.0.0.36';
+const REDIS_HOST = '127.0.0.1';
 const REDIS_PORT = 6379;
 
 // Redis via UNIX socket (for production)
@@ -21,26 +12,26 @@ const REDIS_SOCKET   = '/var/run/redis/redis.sock';
 
 // Redis authentication
 const REDIS_USERNAME = null;                    // e.g. 'pnotes'
-const REDIS_PASSWORD = 'Deflation_TYS#36';   // requirepass or ACL user pwd. Use 'CHANGEME_REDIS_PASS' if needed.
+const REDIS_PASSWORD = 'CHANGEME';   // requirepass or ACL user pwd. Use 'CHANGEME_REDIS_PASS' if needed.
 
 // --- MariaDB via UNIX socket ---
 const MYSQL_USE_SOCKET = true; // Use true for production
 
 // MariaDB via TCP (for development)
-const MYSQL_HOST = '10.0.0.36';
+const MYSQL_HOST = '127.0.0.1';
 const MYSQL_PORT = 3306;
 
 // MariaDB via UNIX socket (for production)
 const MYSQL_SOCKET     = '/run/mysqld/mysqld.sock';
 
 // MariaDB credentials
-const MYSQL_DB         = 'pnotes';
-const MYSQL_USER       = 'pnoteuser';
-const MYSQL_PASS       = 'Deflation_TYS#36';
+const MYSQL_DB         = 'renote';
+const MYSQL_USER       = 'renoteuser';
+const MYSQL_PASS       = 'CHANGEME';
 
 // MariaDB SSL options (for TCP connections)
 const MYSQL_SSL_ENABLE = true; // Set to true to enable SSL/TLS
-const MYSQL_SSL_VERIFY_SERVER_CERT = false; // Set to true for production with a valid cert
+const MYSQL_SSL_VERIFY_SERVER_CERT = true; // Set to true for production with a valid cert
 const MYSQL_SSL_CA = 'ssl/ca.crt'; // Path to CA for production
 const MYSQL_SSL_CRT = 'ssl/client.crt'; // Path to client certificate for production
 const MYSQL_SSL_KEY = 'ssl/client.key'; // Path to client key for production
@@ -66,7 +57,7 @@ const REDIS_LAST_FLUSH_TS = 'cards:last_flush_ts';
 
 // Add a debug flag constant if not present
 if (!defined('APP_DEBUG')) {
-    define('APP_DEBUG', true); // Set to false in production
+    define('APP_DEBUG', false); // Set to false in production
 }
 if (!defined('APP_WRITE_BEHIND')) {
   define('APP_WRITE_BEHIND', true); // toggle stream write-behind
@@ -97,7 +88,5 @@ if (!defined('APP_BATCH_FLUSH_EXPECTED_INTERVAL')) { // seconds between oneshot 
   define('APP_BATCH_FLUSH_EXPECTED_INTERVAL', 180); // 3 minutes
 }
 // Feature toggles
-if (!defined('APP_WRITE_BEHIND')) define('APP_WRITE_BEHIND', true);
 if (!defined('APP_PRUNE_EMPTY')) define('APP_PRUNE_EMPTY', true);
 if (!defined('APP_EMPTY_MINLEN')) define('APP_EMPTY_MINLEN', 1);
-if (!defined('APP_DEBUG')) define('APP_DEBUG', true); // shows Flush/History buttons
