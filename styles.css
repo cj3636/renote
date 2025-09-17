@@ -65,6 +65,7 @@ body {
 }
 .card[draggable="true"] { user-select: none; }
 .card.dragging { opacity: .6; }
+.card.drag-over { outline: 2px dashed var(--accent); outline-offset: -2px; }
 
 .card-handle {
   padding: 8px 10px;
@@ -149,4 +150,5 @@ body {
   border-top-right-radius: var(--radius);
 }
 .card-handle .grab { cursor: grab; font-weight:700; color:#6b7fa8; }
+.card-handle .grab:active { cursor: grabbing; }
 .card-handle .title { flex:1; text-align:center; color:var(--text); opacity:.9; }

@@ -3,6 +3,8 @@
 **ReNotes** is a minimalist web app for managing notes as draggable “cards.”
 It is designed for reliability, instant saving, and low disk writes by combining **Redis** (fast, ephemeral store) with **MariaDB** (persistent store) in a **write-behind** architecture.
 
+> Update (2025-09): Drag & drop ordering has been fixed and modernized. Reordering now uses a standard HTML5 drop action on the card tiles (via the handle) instead of continuously mutating the DOM on every dragover. All card order indices are persisted together to avoid divergence between clients and the server.
+
 ---
 
 ## Purpose
@@ -48,7 +50,7 @@ It is designed for reliability, instant saving, and low disk writes by combining
   * Long-term persistence.
   * `cards` table with schema:
 
-    ```sql
+  ```sql
     CREATE TABLE cards (
       id CHAR(36) PRIMARY KEY,
       name VARCHAR(255) NULL,
@@ -56,7 +58,8 @@ It is designed for reliability, instant saving, and low disk writes by combining
       `order` INT NOT NULL DEFAULT 0,
       updated_at INT NOT NULL
     );
-    ```
+  ```
+
   * Acts as durable store for reloads and history view.
 
 ---
@@ -153,11 +156,3 @@ It is designed for reliability, instant saving, and low disk writes by combining
 * Proper **versioning** of card edits (currently only latest state stored).
 * Richer text formatting or markdown preview.
 * Websocket push for live multi-client sync (currently poll-based).
-
----
-
-✅ With this README, any dev/agent can understand **what PNotes is**, **how Redis + MariaDB are used**, and **where to look in the codebase**.
-
----
-
-Do you want me to also generate a **systemd timer+service pair** (flush every X minutes) to include in the README so ops setup is fool-proof?
