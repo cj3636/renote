@@ -74,12 +74,25 @@ function render() {
     handle.addEventListener('click', (e)=> { if (e.target === grab) return; openModal(card.id); });
     blurb.addEventListener('click', ()=> openModal(card.id));
 
-    // DnD strictly on grab
+    // ---- Drag & Drop (handle-only) ----
+    // We drag the small grab element but move the entire card on drop.
     let dragId=null;
     grab.setAttribute('draggable','true');
-    grab.addEventListener('dragstart', (e)=> { dragId = card.id; e.dataTransfer.setData('text/plain', dragId); });
-    el.addEventListener('dragover', (e)=> { e.preventDefault(); const srcId = dragId || e.dataTransfer.getData('text/plain'); if (!srcId || srcId===card.id) return; reorder(srcId, card.id); });
-    grab.addEventListener('dragend', ()=> dragId=null);
+    grab.addEventListener('dragstart', (e)=> {
+      dragId = card.id;
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', dragId);
+      el.classList.add('dragging');
+    });
+    grab.addEventListener('dragend', ()=> { dragId=null; el.classList.remove('dragging'); });
+    // Allow dropping onto any card (drop = finalize reorder)
+    el.addEventListener('dragover', (e)=> { e.preventDefault(); });
+    el.addEventListener('drop', (e)=> {
+      e.preventDefault();
+      const srcId = dragId || e.dataTransfer.getData('text/plain');
+      if (!srcId || srcId === card.id) return;
+      reorder(srcId, card.id);
+    });
   });
 }
 
@@ -92,8 +105,10 @@ function reorder(srcId, tgtId) {
   cards.splice(tgtIdx,0,moved);
   cards.forEach((c,i)=>c.order=i);
   saveLocal();
-  queueServerSave(moved);
-  render();
+  // Persist all order changes (not just moved card) so server stays consistent
+  try { API.bulkSave(cards.map(c=>({id:c.id, text:c.text, order:c.order, name:c.name||''}))); } catch {}
+  queueServerSave(moved); // also send single save for immediacy
+  render(); // re-render after drop only
 }
 
 // ===== Modal =====
