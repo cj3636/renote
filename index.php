@@ -11,6 +11,15 @@ if (empty($state['cards'])) {
     redis_upsert_card($id, $welcome, 0);
     $state = load_state();
 }
+
+// Security headers
+$cspNonce = bin2hex(random_bytes(16));
+header("X-Content-Type-Options: nosniff");
+header("X-Frame-Options: DENY");
+header("Referrer-Policy: strict-origin-when-cross-origin");
+header("Permissions-Policy: microphone=(), camera=(), geolocation=()");
+// CSP: allow scripts self + nonce, disallow inline styles except loaded stylesheet, restrict everything else.
+header("Content-Security-Policy: default-src 'none'; script-src 'self' 'nonce-$cspNonce'; style-src 'self'; img-src 'self' data:; connect-src 'self'; font-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self';");
 ?>
 <!doctype html>
 <html lang="en">
@@ -32,7 +41,7 @@ if (empty($state['cards'])) {
 <?php require_once __DIR__ . '/partials/modal.php'; ?>
 <script src="modern.store.min.js"></script>
 <script src="app.js" type="module"></script>
-<script type="module">
+<script type="module" nonce="<?= $cspNonce ?>">
 // Manual flush button handler
 <?php if (defined('APP_DEBUG') && APP_DEBUG): ?>
 const flushBtn = document.getElementById('flushBtn');
