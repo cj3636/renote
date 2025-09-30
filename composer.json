@@ -1,7 +1,26 @@
 {
   "name": "tys/pnotes",
   "type": "project",
-  "require": { "predis/predis": "^2.3" },
-  "autoload": { "psr-4": { "": "." } }
+  "require": {
+    "predis/predis": "^2.3",
+    "ext-pdo": "*",
+    "ext-mbstring": "*"
+  },
+  "require-dev": {
+    "phpunit/phpunit": "^10.5",
+    "phpstan/phpstan": "^1.11",
+    "friendsofphp/php-cs-fixer": "^3.64"
+  },
+  "autoload": {
+    "psr-4": {
+      "Renote\\": "src/",
+      "": "."
+    }
+  },
+  "scripts": {
+    "test": "phpunit --colors=always",
+    "analyse": "phpstan analyse --memory-limit=512M",
+    "lint": "php -l index.php api.php bootstrap.php flush.php || true",
+    "format": "php-cs-fixer fix --using-cache=no --verbose"
+  }
 }
-

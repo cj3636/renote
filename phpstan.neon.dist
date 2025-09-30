@@ -1,0 +1,13 @@
+parameters:
+  level: 5
+  paths:
+    - bootstrap.php
+    - api.php
+    - flush.php
+    - src
+  excludePaths:
+    - legacy
+  ignoreErrors:
+    - '#Undefined variable: stats#'
+  checkMissingIterableValueType: false
+  reportUnmatchedIgnoredErrors: true

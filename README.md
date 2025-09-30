@@ -1,158 +1,339 @@
-# ReNotes
+# Renote
 
-**ReNotes** is a minimalist web app for managing notes as draggable “cards.”
-It is designed for reliability, instant saving, and low disk writes by combining **Redis** (fast, ephemeral store) with **MariaDB** (persistent store) in a **write-behind** architecture.
+A minimalist, fast note cards web app. Every keystroke is saved instantly to Redis (hot working set) and persisted asynchronously to MariaDB via a write‑behind stream worker. Offline‑friendly (localStorage), dark UI, drag & drop ordering, soft delete with recovery history.
 
-> Update (2025-09): Drag & drop ordering has been fixed and modernized. Reordering now uses a standard HTML5 drop action on the card tiles (via the handle) instead of continuously mutating the DOM on every dragover. All card order indices are persisted together to avoid divergence between clients and the server.
-
----
-
-## Purpose
-
-* Provide a **dark-mode single page web app** for creating and editing text cards.
-* Every keystroke is **saved instantly** to localStorage (client), Redis (server), and eventually MariaDB (persistent DB).
-* Cards can have:
-
-  * **Name** (optional, shown in grid header)
-  * **Text body**
-  * **Order** (sortable via drag handle)
-* Cards open in a modal editor with:
-
-  * Double-confirm delete (soft delete in Redis first; DB purge happens on flush)
-  * Fullscreen toggle for editing
-* Cards deleted from Redis remain in MariaDB until a flush, so they can be **restored** via a History view.
+<p align="center"><img alt="Renote screenshot" src="docs/hero-placeholder.png" width="640" /></p>
 
 ---
 
-## Architecture
+## Badges
 
-### Frontend
-
-* Served by **PHP** through Nginx.
-* Single page app (`index.php`) loads:
-
-  * **`app.js`** for logic (grid, modal, editor, drag & drop, flush/history UI).
-  * **`modern.store.min.js`** for localStorage wrapper.
-* State is bootstrapped safely as JSON (avoids script injection from note contents).
-* Cards are draggable only via a **grab handle** in the top bar.
-
-### Backend
-
-* **PHP (index.php, api.php, bootstrap.php, flush\_redis\_to\_db.php)**
-* **Redis**
-
-  * Primary working store.
-  * Holds card hashes: `card:<id>` with fields `id`, `name`, `text`, `order`, `updated_at`.
-  * Sorted set `cards:index` stores card order.
-  * Write-behind stream `cards:stream` records changes (`XADD`).
-* **MariaDB**
-
-  * Long-term persistence.
-  * `cards` table with schema:
-
-  ```sql
-    CREATE TABLE cards (
-      id CHAR(36) PRIMARY KEY,
-      name VARCHAR(255) NULL,
-      txt MEDIUMTEXT NOT NULL,
-      `order` INT NOT NULL DEFAULT 0,
-      updated_at INT NOT NULL
-    );
-  ```
-
-  * Acts as durable store for reloads and history view.
+![Language](https://img.shields.io/badge/PHP-8.1%2B-777bb3?logo=php)
+![Redis](https://img.shields.io/badge/Redis-6%2B-red?logo=redis)
+![MariaDB](https://img.shields.io/badge/MariaDB-10.5%2B-003545?logo=mariadb)
+![License](https://img.shields.io/badge/License-MIT-green)
+![Status](https://img.shields.io/badge/Status-Early%20Release-blue)
 
 ---
 
-## Data Flow
+## Table of Contents
 
-1. **User types in card modal**
-   → JS saves locally (`localStorage`) and asynchronously to API (`save_card`).
-   → API upserts into Redis hash & sorted set.
-   → Redis also logs into stream (`XADD`) for write-behind persistence.
-
-2. **Worker flush (flush\_redis\_to\_db.php)**
-
-   * Continuously (systemd service/timer) or manually (API `flush_once`).
-   * Reads Redis stream from last ID.
-   * For each card ID:
-
-     * If Redis hash is missing → DELETE from DB.
-     * If text empty & pruning enabled → DELETE from DB.
-     * Else UPSERT row.
-   * Updates stats (`upserts`, `purges`, `skipped_empty`, `seen`).
-   * Trims stream to max length.
-   * Updates `REDIS_STREAM_LAST` + `REDIS_LAST_FLUSH_TS`.
-
-3. **History view**
-
-   * Queries DB for rows whose IDs are not in Redis index.
-   * Allows user to **restore** (rehydrate into Redis) or **purge** (delete from DB permanently).
+- Features
+- Quick Start (Development)
+- Production Deployment
+- Configuration
+- Data Model & Architecture
+- API Overview
+- Background Worker
+- History / Soft Delete Semantics
+- Security & Hardening
+- Operations & Health
+- Development Tooling (Linting / Tests)
+- Roadmap & Upcoming Work
+- Removed / Legacy Artifacts
+- Missing / Deferred Features (from early design notes)
+- License
 
 ---
 
-## Deployment
+## Features
 
-### Requirements
-
-* **Nginx + PHP-FPM**
-* **Redis** (preferably via UNIX socket for prod)
-* **MariaDB** (with `pnotes` DB and `pnoteuser` user)
-
-### Config
-
-* `config.php` defines:
-
-  * Redis connection (TCP or UNIX socket, password optional).
-  * MariaDB connection (TCP+TLS or UNIX socket).
-  * Feature toggles (write-behind enabled, debug UI, prune empty cards).
-* `systemd` service + timer run the flush worker periodically:
-
-  ```ini
-  [Unit]
-  Description=Flush Redis notes to MariaDB
-
-  [Service]
-  ExecStart=/usr/bin/php /var/www/pnote/flush_redis_to_db.php
-  Restart=on-failure
-
-  [Install]
-  WantedBy=multi-user.target
-  ```
+- Instant persistence: localStorage + Redis per keystroke (debounced network ~450ms)
+- Asynchronous durability via Redis Streams → MariaDB write‑behind worker
+- Dark single‑page UI (no framework) with semantic HTML & minimal JS
+- Draggable ordering (handle only) with bulk order synchronization to avoid divergence
+- Modal editor with fullscreen toggle and double‑confirm delete
+- Optional card name (title) + automatic blurb preview (first sentence)
+- Soft delete: removed from Redis but recoverable from MariaDB until flush purges
+- History drawer (UI) to restore or purge DB‑only cards
+- Health indicator (lag classification: ok / degraded / backlog)
+- Adaptive stream flush batch sizing
+- Stream trimming to prevent unbounded growth
 
 ---
 
-## Key Files
+## Quick Start (Development)
 
-* `index.php` – main SPA entry, includes partials (`partials/header.php`, `partials/modal.php`).
-* `app.js` – frontend logic (grid, modal, drag & drop, save, flush/history).
-* `api.php` – backend API endpoints:
+Assumes: PHP 8.1+, Redis, MariaDB running locally (TCP or sockets). For quick experimentation you can skip MariaDB initially (some features will be limited).
 
-  * `state`, `save_card`, `bulk_save`, `delete_card` (soft delete),
-  * `flush_once`, `health`, `trim_stream`, `history`, `history_purge`, `history_restore`.
-* `bootstrap.php` – initializes Redis + DB clients, contains core helpers:
+1. Copy example config
 
-  * `load_state()`, `redis_upsert_card()`, `delete_card_redis_only()`, `_db_upsert_card()`, `_db_delete_card()`.
-  * Worker helpers: `worker_flush_event()`, `worker_commit_batch()`, `worker_commit_pending()`.
-* `flush_redis_to_db.php` – background worker for write-behind persistence, prints stats when run manually.
-* `styles.css` – dark-mode UI, modal, fullscreen, history drawer.
-* `config.php` – defines constants for DB/Redis connection and app features.
+```
+cp example.config.php config.php
+# Edit config.php with correct Redis/MariaDB credentials (keep secrets local)
+```
+
+2. Install dependencies
+
+```
+composer install
+```
+
+3. Create database + table (adjust database/user if changed):
+
+```sql
+CREATE DATABASE IF NOT EXISTS pnotes CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+USE pnotes;
+CREATE TABLE IF NOT EXISTS cards (
+  id         VARCHAR(64) PRIMARY KEY,
+  name       VARCHAR(255) NULL,
+  txt        MEDIUMTEXT NOT NULL,
+  `order`    INT NOT NULL DEFAULT 0,
+  updated_at BIGINT NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+```
+
+4. Run a PHP dev server (or use Apache/Nginx):
+
+```
+php -S localhost:8080 index.php
+```
+
+5. Open http://localhost:8080 and start adding cards.
+
+6. Manually flush (in debug mode) via the ⟳ button or CLI:
+
+```
+php flush.php --once
+```
+
+> For development you may set `APP_DEBUG` to true in `config.php` to reveal debug & history controls.
 
 ---
 
-## Features To Know
+## Production Deployment
 
-* **Every edit is instant**: saved locally + queued for Redis/DB flush.
-* **Soft delete**: cards removed from Redis remain recoverable in DB until flushed.
-* **History drawer**: view DB-only cards; restore or purge them.
-* **Optional card names**: shown in grid header; saved to DB.
-* **Drag-and-drop**: only via grab handle.
-* **Flush stats**: visible in CLI and UI debug mode.
+Recommend Nginx → PHP‑FPM. Place project in `/var/www/renote` (or similar). Use systemd timer to run `flush.php --once` every few minutes (batch mode) or run continuously in continuous mode.
+
+Example Nginx server block (minimal):
+
+```
+server {
+  listen 80;
+  server_name notes.example.com;
+  root /var/www/renote;
+  index index.php;
+
+  location / { try_files $uri /index.php; }
+
+  location ~ \.php$ {
+    include fastcgi_params;
+    fastcgi_param SCRIPT_FILENAME $realpath_root$fastcgi_script_name;
+    fastcgi_pass unix:/run/php/php-fpm.sock; # adjust
+  }
+}
+```
+
+### systemd (batch flush)
+
+`docs/renote.service` (oneshot) and `docs/renote.timer` are provided. Install & enable:
+
+```
+sudo cp docs/renote.service docs/renote.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now renote.timer
+```
+
+Adjust interval in `renote.timer` to match `APP_BATCH_FLUSH_EXPECTED_INTERVAL` (default 180s) for accurate health status.
 
 ---
 
-## TODO / Nice-to-haves
+## Configuration
 
-* Proper **versioning** of card edits (currently only latest state stored).
-* Richer text formatting or markdown preview.
-* Websocket push for live multi-client sync (currently poll-based).
+Configuration is constant‑based (`config.php`). Do NOT commit real secrets. Copy from `example.config.php`.
+
+Key constants:
+
+- Redis: `REDIS_CONNECTION_TYPE` (`unix`|`tcp`), `REDIS_SOCKET`, `REDIS_HOST`, `REDIS_PORT`, `REDIS_USERNAME`, `REDIS_PASSWORD`
+- MariaDB: `MYSQL_USE_SOCKET`, `MYSQL_SOCKET`, `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_DB`, `MYSQL_USER`, `MYSQL_PASS`
+- Write‑behind / worker: `APP_WRITE_BEHIND`, `APP_WRITE_BEHIND_MODE` (`batch`|`continuous`), `APP_STREAM_MAXLEN`, `APP_WORKER_MAX_BATCH`, `APP_WORKER_TRIM_EVERY`
+- Health thresholds: `APP_WORKER_MIN_OK_LAG`, `APP_WORKER_MIN_DEGRADED_LAG`, `APP_BATCH_FLUSH_EXPECTED_INTERVAL`
+- Pruning: `APP_PRUNE_EMPTY`, `APP_EMPTY_MINLEN`
+- Debug UI: `APP_DEBUG`
+
+You may externalize these using environment injection tooling during deployment (e.g. templating to file).
+
+---
+
+## Data Model & Architecture
+
+| Layer | Purpose |
+|-------|---------|
+| Browser localStorage | Immediate offline resilience / rapid UX feedback |
+| Redis Hash `card:<id>` | Authoritative hot state (fields: id, name, text, order, updated_at) |
+| Redis Sorted Set `cards:index` | Global ordering of card IDs |
+| Redis Stream `cards:stream` | Append‑only change log for write‑behind worker |
+| MariaDB `cards` table | Durable persistence & history recovery |
+
+Flow:
+
+1. User types → JS updates local state + debounced `save_card` to API
+2. API writes Redis hash + index and appends to stream (or writes DB directly if write‑behind disabled)
+3. Worker consumes stream entries grouping by card id (coalesced) → UPSERT / DELETE in MariaDB
+4. Deletions: removing from Redis (soft delete) is later detected as missing hash during flush and DB row is purged (unless restored first)
+
+---
+
+## API Overview (JSON)
+
+| Action | Method | Params / Body | Notes |
+|--------|--------|---------------|-------|
+| `state` | GET | – | Full current state (Redis bootstrap) |
+| `save_card` | POST | `{id,name?,text,order}` | Upsert one card (ID + size validated) |
+| `bulk_save` | POST | `{cards:[...]}` | Order + batch upserts (invalid cards skipped) |
+| `delete_card` | POST | `{id}` | Soft delete (Redis only) |
+| `history` | GET | – | DB rows not in Redis |
+| `history_restore` | POST | `{id}` | Rehydrate row into Redis (debug mode only) |
+| `history_purge` | POST | `{id}` | Permanently remove DB row (debug mode only) |
+| `flush_once` | GET | – | Run one worker batch (debug mode only) |
+| `trim_stream` | GET | `keep` | Approximate trim (debug mode only) |
+| `health` | GET | – | Lag & status classification |
+| `metrics` | GET | – | Cumulative saves/deletes + stream stats |
+
+All responses: `{ ok: boolean, ... }` or `{ ok:false, error: string }`.
+
+### Validation & Limits
+- IDs: hex (16–64 chars) or UUID v4; strict UUID enforced if `APP_REQUIRE_UUID=true`.
+- Text length: capped by `APP_CARD_MAX_LEN` (default 256KB) → oversize returns `text_too_long`.
+- Rate limiting: mutating endpoints limited per IP via Redis counters (`APP_RATE_LIMIT_MAX` per `APP_RATE_LIMIT_WINDOW`).
+
+---
+
+## Background Worker (`flush.php`)
+
+- Reads stream with `XRANGE` batches (adaptive) in batch or continuous mode
+- Coalesces events per card id before a DB transaction
+- Missing hash ⇒ DELETE row; empty text (below `APP_EMPTY_MINLEN`) ⇒ pruned
+- Updates `REDIS_STREAM_LAST` only after successful DB commit
+- Trims stream every `APP_WORKER_TRIM_EVERY` processed events (approximate trim)
+- Exposes stats (CLI output when run manually)
+
+---
+
+## History / Soft Delete
+
+- Deleting a card removes its Redis hash + index membership (soft)
+- Until the worker processes the stream entry (or detects absence) the MariaDB row remains
+- History drawer lists DB rows whose ids are not in Redis so they can be restored or purged
+
+---
+
+## Security & Hardening
+
+| Area | Recommendation |
+|------|----------------|
+| Secrets | Keep `config.php` outside repo; mount or template it per env |
+| Redis | Use UNIX socket with restricted group + ACL / password; enable AOF everysec |
+| DB | Least privilege user limited to `cards` table; prefer UNIX socket |
+| Input | ID + size validation enforced server-side (see API overview) |
+| Output Escaping | JSON embedded via `safe_json_for_script` to prevent tag breakouts |
+| Headers | Strong CSP (nonce), X-Frame-Options DENY, nosniff, strict referrer, trimmed Permissions-Policy |
+| Rate Limiting | Enabled for mutating endpoints (tunable) |
+| Future | Add per-card version limit & optional HTML sanitizer if markdown rendering added |
+
+---
+
+## Operations & Health
+
+Health endpoint computes backlog estimates from `REDIS_STREAM_LAST` → classifies lag thresholds:
+- ok: `< APP_WORKER_MIN_OK_LAG`
+- degraded: `< APP_WORKER_MIN_DEGRADED_LAG`
+- backlog: otherwise
+
+In batch mode status relaxes if still within expected interval since last flush.
+
+Systemd health timer (`docs/renote-health.service` / `.timer`) can curl the health endpoint and journal results.
+
+---
+
+## Development Tooling
+
+Composer dev dependencies (after update): phpstan, phpunit, php-cs-fixer.
+
+```
+composer install
+composer run lint     # (if script added)
+composer test
+```
+
+Static Analysis (phpstan): Adjust level / paths in `phpstan.neon.dist`.
+
+Coding Style (php-cs-fixer): Run `vendor/bin/php-cs-fixer fix` (dry‑run in CI first).
+
+Testing: Basic smoke tests in `tests/` (extend with Redis integration tests using a disposable DB/schema).
+
+Suggested CI steps:
+1. validate composer (install --no-interaction)
+2. php -l *.php (syntax)
+3. phpstan analyse
+4. phpunit
+
+---
+
+## Roadmap & Upcoming Work
+
+- Markdown rendering & preview panel
+- Lightweight WYSIWYG formatting (inline bold/italic/code, lists)
+- Text size limit + graceful truncation warnings
+- Full audit/event timeline (version history per card)
+- Search (full‑text index via MariaDB or external engine)
+- WebSocket push (live multi‑client sync)
+- Multi‑user/auth (namespaces per user)
+- Attachments (object storage + signed URLs)
+- Export/import (JSON / Markdown bundle)
+
+---
+
+## Removed / Legacy Artifacts
+
+Legacy prototype files have been fully purged in this refactor:
+- `api.redis.php` (direct Redis prototype)
+- `api.js` (superseded by `app.js`)
+- `legacy/` directory
+
+No migration steps required; production behavior unchanged for supported endpoints.
+
+---
+
+## Missing / Deferred Features (from early design notes)
+
+Items described in earlier internal AI specification but not currently implemented or intentionally deferred:
+- Continuous worker service mode (supported by code but not shipped with a dedicated continuous systemd unit in `docs/` yet)
+- Rich text / markdown editing (planned)
+- Versioned edit history per card (only latest state stored)
+- WebSocket real‑time collaboration (currently poll + manual refresh pattern)
+- Full security hardening (CSP, rate limiting, size quotas)
+- Multi‑user authentication & per‑user isolation
+- Attachments / file uploads
+
+---
+
+## License
+
+MIT. See LICENSE (to be added if not present).
+
+---
+
+## Contributing
+
+PRs welcome. Please run linting & tests before submitting. For larger changes open an issue / discussion first.
+
+---
+
+## Quick Dev Commands (Reference)
+
+```
+# Run worker once (batch mode)
+php flush.php --once --quiet
+
+# Run worker continuously (experimental)
+php flush.php --quiet --loop   # (would need enhancement to support --loop flag)
+
+# Static analysis
+vendor/bin/phpstan analyse
+
+# Tests
+composer test
+```
+
+> Thank you for using / contributing to Renote! 🎉
