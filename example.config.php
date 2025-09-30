@@ -1,5 +1,5 @@
 <?php
-APP_DEBUG = false;
+const APP_DEBUG = false;
 // --- Redis via UNIX socket ---
 const REDIS_CONNECTION_TYPE = 'unix'; // Use 'unix' for socket, 'tcp' for ip
 
