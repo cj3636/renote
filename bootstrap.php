@@ -26,6 +26,19 @@ function redis_client() {
     return $redis;
 }
 
+// Parse and cache JSON input body for POST/PUT requests.
+if (!function_exists('json_input')) {
+  function json_input(): array {
+    static $cache = null;
+    if ($cache !== null) return $cache;
+    $raw = file_get_contents('php://input');
+    if ($raw === false || $raw === '') { $cache = []; return $cache; }
+    $data = json_decode($raw, true);
+    if (!is_array($data)) { $cache = []; return $cache; }
+    $cache = $data; return $cache;
+  }
+}
+
 function db() {
     static $pdo = null;
     if ($pdo === null) {

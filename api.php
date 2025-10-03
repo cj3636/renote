@@ -5,6 +5,16 @@ header('Content-Type: application/json');
 
 if (!isset($GLOBALS['stats'])) { $GLOBALS['stats'] = ['upserts'=>0,'purges'=>0,'skipped_empty'=>0,'seen'=>0]; }
 
+// Backwards compat: ensure json_input exists even if bootstrap not updated in some environments yet.
+if (!function_exists('json_input')) {
+    function json_input(): array {
+        $raw = file_get_contents('php://input');
+        if ($raw === false || $raw === '') return [];
+        $data = json_decode($raw, true);
+        return is_array($data) ? $data : [];
+    }
+}
+
 $action = $_GET['action'] ?? 'state';
 
 // Remove local validate_card_payload in favor of shared helper
