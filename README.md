@@ -2,17 +2,17 @@
 
 A minimalist, fast note cards web app. Every keystroke is saved instantly to Redis (hot working set) and persisted asynchronously to MariaDB via a write‑behind stream worker. Offline‑friendly (localStorage), dark UI, drag & drop ordering, soft delete with recovery history.
 
-<p align="center"><img alt="Renote screenshot" src="docs/hero-placeholder.png" width="640" /></p>
+
 
 ---
 
 ## Badges
 
-![Language](https://img.shields.io/badge/PHP-8.1%2B-777bb3?logo=php)
-![Redis](https://img.shields.io/badge/Redis-6%2B-red?logo=redis)
-![MariaDB](https://img.shields.io/badge/MariaDB-10.5%2B-003545?logo=mariadb)
-![License](https://img.shields.io/badge/License-MIT-green)
-![Status](https://img.shields.io/badge/Status-Early%20Release-blue)
+![Language](https://img.shields.io/badge/PHP-8.1%2B-777bb3?logo=php&style=for-the-badge)
+![Redis](https://img.shields.io/badge/Redis-6%2B-red?logo=redis&style=for-the-badge)
+![MariaDB](https://img.shields.io/badge/MariaDB-10.5%2B-003545?logo=mariadb&style=for-the-badge)
+![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)
+![Status](https://img.shields.io/badge/Status-Early%20Release-blue?style=for-the-badge)
 
 ---
 
@@ -89,7 +89,7 @@ CREATE TABLE IF NOT EXISTS cards (
 php -S localhost:8080 index.php
 ```
 
-5. Open http://localhost:8080 and start adding cards.
+5. Open <http://localhost:8080> and start adding cards.
 
 6. Manually flush (in debug mode) via the ⟳ button or CLI:
 
@@ -194,6 +194,7 @@ Flow:
 All responses: `{ ok: boolean, ... }` or `{ ok:false, error: string }`.
 
 ### Validation & Limits
+
 - IDs: hex (16–64 chars) or UUID v4; strict UUID enforced if `APP_REQUIRE_UUID=true`.
 - Text length: capped by `APP_CARD_MAX_LEN` (default 256KB) → oversize returns `text_too_long`.
 - Rate limiting: mutating endpoints limited per IP via Redis counters (`APP_RATE_LIMIT_MAX` per `APP_RATE_LIMIT_WINDOW`).
@@ -237,6 +238,7 @@ All responses: `{ ok: boolean, ... }` or `{ ok:false, error: string }`.
 ## Operations & Health
 
 Health endpoint computes backlog estimates from `REDIS_STREAM_LAST` → classifies lag thresholds:
+
 - ok: `< APP_WORKER_MIN_OK_LAG`
 - degraded: `< APP_WORKER_MIN_DEGRADED_LAG`
 - backlog: otherwise
@@ -264,6 +266,7 @@ Coding Style (php-cs-fixer): Run `vendor/bin/php-cs-fixer fix` (dry‑run in CI 
 Testing: Basic smoke tests in `tests/` (extend with Redis integration tests using a disposable DB/schema).
 
 Suggested CI steps:
+
 1. validate composer (install --no-interaction)
 2. php -l *.php (syntax)
 3. phpstan analyse
@@ -288,6 +291,7 @@ Suggested CI steps:
 ## Removed / Legacy Artifacts
 
 Legacy prototype files have been fully purged in this refactor:
+
 - `api.redis.php` (direct Redis prototype)
 - `api.js` (superseded by `app.js`)
 - `legacy/` directory
@@ -299,6 +303,7 @@ No migration steps required; production behavior unchanged for supported endpoin
 ## Missing / Deferred Features (from early design notes)
 
 Items described in earlier internal AI specification but not currently implemented or intentionally deferred:
+
 - Continuous worker service mode (supported by code but not shipped with a dedicated continuous systemd unit in `docs/` yet)
 - Rich text / markdown editing (planned)
 - Versioned edit history per card (only latest state stored)

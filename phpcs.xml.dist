@@ -1,0 +1,25 @@
+<?xml version="1.0"?>
+<ruleset name="Renote Coding Standard">
+  <description>PSR-12 base with selective exclusions for legacy bootstrap and worker scripts.</description>
+  <file>api.php</file>
+  <file>bootstrap.php</file>
+  <file>config.php</file>
+  <file>flush.php</file>
+  <file>index.php</file>
+  <file>src</file>
+  <exclude-pattern>vendor/*</exclude-pattern>
+  <exclude-pattern>tests/*</exclude-pattern>
+
+  <rule ref="PSR12"/>
+
+  <!-- Allow long lines in README embedding or inline JSON script tags -->
+  <rule ref="Generic.Files.LineLength">
+    <properties>
+      <property name="lineLimit" value="160"/>
+      <property name="absoluteLineLimit" value="0"/>
+    </properties>
+  </rule>
+
+  <!-- Some scripts intentionally omit declare(strict_types=1) for broad compatibility -->
+  <rule ref="SlevomatCodingStandard.TypeHints.DeclareStrictTypes" severity="0"/>
+</ruleset>
