@@ -13,6 +13,8 @@ Group=www-data
 SupplementaryGroups=redis
 WorkingDirectory=/var/www/renote
 ExecStart=/usr/bin/php /var/www/renote/flush.php --once --quiet
+# Load environment variables (create /etc/renote.env from .env.example)
+EnvironmentFile=-/etc/renote.env
 TimeoutStartSec=20
 
 # Hardening

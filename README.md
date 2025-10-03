@@ -56,11 +56,11 @@ A minimalist, fast note cards web app. Every keystroke is saved instantly to Red
 
 Assumes: PHP 8.1+, Redis, MariaDB running locally (TCP or sockets). For quick experimentation you can skip MariaDB initially (some features will be limited).
 
-1. Copy example config
+1. Create your env file
 
 ```
-cp example.config.php config.php
-# Edit config.php with correct Redis/MariaDB credentials (keep secrets local)
+cp .env.example .env
+# Edit .env with Redis/MariaDB credentials (never commit real secrets)
 ```
 
 2. Install dependencies
@@ -97,7 +97,7 @@ php -S localhost:8080 index.php
 php flush.php --once
 ```
 
-> For development you may set `APP_DEBUG` to true in `config.php` to reveal debug & history controls.
+> For development you may set `APP_DEBUG=true` in `.env` to reveal debug & history controls.
 
 ---
 
@@ -140,18 +140,19 @@ Adjust interval in `renote.timer` to match `APP_BATCH_FLUSH_EXPECTED_INTERVAL` (
 
 ## Configuration
 
-Configuration is constant‑based (`config.php`). Do NOT commit real secrets. Copy from `example.config.php`.
+All runtime settings now come from environment variables (`.env` in development). `config.php` loads and maps them to legacy constants so existing code continues to function. See `.env.example` for the full list and descriptions.
 
-Key constants:
+Key environment variables:
 
-- Redis: `REDIS_CONNECTION_TYPE` (`unix`|`tcp`), `REDIS_SOCKET`, `REDIS_HOST`, `REDIS_PORT`, `REDIS_USERNAME`, `REDIS_PASSWORD`
-- MariaDB: `MYSQL_USE_SOCKET`, `MYSQL_SOCKET`, `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_DB`, `MYSQL_USER`, `MYSQL_PASS`
-- Write‑behind / worker: `APP_WRITE_BEHIND`, `APP_WRITE_BEHIND_MODE` (`batch`|`continuous`), `APP_STREAM_MAXLEN`, `APP_WORKER_MAX_BATCH`, `APP_WORKER_TRIM_EVERY`
-- Health thresholds: `APP_WORKER_MIN_OK_LAG`, `APP_WORKER_MIN_DEGRADED_LAG`, `APP_BATCH_FLUSH_EXPECTED_INTERVAL`
-- Pruning: `APP_PRUNE_EMPTY`, `APP_EMPTY_MINLEN`
+- Redis: `REDIS_CONNECTION`, `REDIS_SOCKET`, `REDIS_HOST`, `REDIS_PORT`, `REDIS_USERNAME`, `REDIS_PASSWORD`
+- MariaDB: `DB_USE_SOCKET`, `DB_SOCKET`, `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASS`, `DB_SSL_ENABLE`, `DB_SSL_VERIFY`, `DB_SSL_CA`, `DB_SSL_CRT`, `DB_SSL_KEY`
+- Worker: `APP_WRITE_BEHIND`, `APP_WRITE_BEHIND_MODE`, `APP_STREAM_MAXLEN`, `WORKER_MAX_BATCH`, `WORKER_TRIM_EVERY`, `WORKER_BLOCK_MS`
+- Health thresholds: `WORKER_MIN_OK_LAG`, `WORKER_MIN_DEGRADED_LAG`, `BATCH_FLUSH_EXPECTED_INTERVAL`
+- Pruning / limits: `PRUNE_EMPTY`, `EMPTY_MINLEN`, `APP_CARD_MAX_LEN`
+- Rate limiting & validation: `RATE_LIMIT_WINDOW`, `RATE_LIMIT_MAX`, `APP_REQUIRE_UUID`
 - Debug UI: `APP_DEBUG`
 
-You may externalize these using environment injection tooling during deployment (e.g. templating to file).
+Systemd: copy `.env` to `/etc/renote.env` (or similar) and the provided `renote.service` will load it via `EnvironmentFile=-/etc/renote.env`.
 
 ---
 
