@@ -2,8 +2,12 @@
 const bootEl = document.getElementById('bootstrap');
 let serverState = {};
 try { serverState = JSON.parse(bootEl?.textContent || '{}'); } catch {}
+// Local-first boot, then reconcile with server to avoid device divergence.
 let state = store.get('cards_state', null) || serverState || {cards:[], updated_at:0};
 state.cards ||= [];
+
+// Track whether we've synced after boot so we don't show placeholder titles for long.
+let initialSynced = false;
 
 const grid = document.getElementById('grid');
 const addBtn = document.getElementById('addCardBtn');
@@ -244,3 +248,61 @@ closeHistory?.addEventListener('click', ()=>{ drawer.classList.add('hidden'); dr
 
 // ===== Initial render =====
 render();
+
+// ===== Reconciliation Logic =====
+async function reconcileWithServer(force = false) {
+  try {
+    const remote = await API.state();
+    if (!remote || !Array.isArray(remote.cards)) return;
+
+    // Build map of existing local cards by id
+    const localMap = Object.fromEntries(state.cards.map(c=>[c.id,c]));
+    let changed = false;
+
+    // Merge: for each remote card, if missing locally add; if remote newer, update
+    const merged = [];
+    for (const rc of remote.cards) {
+      const lc = localMap[rc.id];
+      if (!lc) { // new card from server not on this device
+        merged.push({ id: rc.id, name: rc.name||'', text: rc.text||'', order: rc.order|0, updated_at: rc.updated_at|0 });
+        changed = true;
+      } else {
+        // If remote more recent OR local has missing name while remote has one, update fields
+        const needsUpdate = (rc.updated_at|0) > (lc.updated_at|0) || (!lc.name && rc.name);
+        if (needsUpdate) {
+          lc.name = rc.name||'';
+          lc.text = rc.text||'';
+          lc.order = rc.order|0;
+          lc.updated_at = rc.updated_at|0;
+          changed = true;
+        }
+        merged.push(lc);
+        delete localMap[rc.id];
+      }
+    }
+    // Any leftover local-only cards (not on server). We keep them but also push them to server if force specified or they appear unsynced (missing updated_at)
+    const leftovers = Object.values(localMap);
+    if (leftovers.length) {
+      for (const c of leftovers) { merged.push(c); }
+      // Push unsynced leftovers (no updated_at or zero) to server so they appear on other devices.
+      leftovers.filter(c=>!c.updated_at).forEach(c=> queueServerSave(c));
+    }
+    // Normalize order indexes (server authoritative order wins where clash)
+    merged.sort((a,b)=>a.order-b.order).forEach((c,i)=>{ c.order = i; });
+    if (changed || force) {
+      state.cards = merged;
+      saveLocal();
+      render();
+    }
+    initialSynced = true;
+  } catch (e) {
+    // silent – offline maybe
+  }
+}
+
+// Perform initial reconciliation shortly after boot (allow first paint), then periodic lightweight sync
+setTimeout(()=>reconcileWithServer(true), 150);
+setInterval(()=>reconcileWithServer(false), 15000); // every 15s
+
+// If page loaded with no titles (all blank) attempt an earlier quick sync
+if (state.cards.some(c=>!c.name)) { reconcileWithServer(false); }
