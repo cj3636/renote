@@ -42,7 +42,18 @@ const API = {
 const uid = () => crypto.randomUUID?.() || (Date.now().toString(36)+Math.random().toString(36).slice(2));
 const firstSentence = (t) => { if (!t) return ''; const m = t.match(/[^.!?]*[.!?]/); return (m?m[0]:t).trim(); };
 const debounce = (fn, ms=400)=>{ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), ms); }; };
-const serverSaveDebounced = debounce((card)=> API.saveCard(card), 450);
+const serverSaveDebounced = debounce(async (card)=> {
+  try {
+    const res = await API.saveCard(card);
+    if (res && res.ok && res.updated_at && card) {
+      const local = state.cards.find(c=>c.id===card.id);
+      if (local) {
+        local.updated_at = res.updated_at|0;
+        saveLocal();
+      }
+    }
+  } catch {}
+}, 450);
 
 let currentId = null;
 let trashArmed = false;
@@ -280,12 +291,25 @@ async function reconcileWithServer(force = false) {
         delete localMap[rc.id];
       }
     }
-    // Any leftover local-only cards (not on server). We keep them but also push them to server if force specified or they appear unsynced (missing updated_at)
+    // Any leftover local-only cards (not on server).
     const leftovers = Object.values(localMap);
     if (leftovers.length) {
-      for (const c of leftovers) { merged.push(c); }
-      // Push unsynced leftovers (no updated_at or zero) to server so they appear on other devices.
-      leftovers.filter(c=>!c.updated_at).forEach(c=> queueServerSave(c));
+      const nowSec = Date.now()/1000|0;
+      for (const c of leftovers) {
+        // If card has never been synced (no updated_at) treat as new and push upstream.
+        if (!c.updated_at) {
+          queueServerSave(c);
+          merged.push(c);
+          continue;
+        }
+        // If it has been synced before but is absent remotely, assume it was deleted elsewhere -> drop locally.
+        // Grace period: if last update < 5s ago, keep (could be race with remote flush lag).
+        if ((nowSec - c.updated_at) < 5) {
+          merged.push(c); // keep during grace window
+        } else {
+          changed = true; // pruning
+        }
+      }
     }
     // Normalize order indexes (server authoritative order wins where clash)
     merged.sort((a,b)=>a.order-b.order).forEach((c,i)=>{ c.order = i; });

@@ -1,19 +1,15 @@
 <?php
 require_once __DIR__ . '/bootstrap.php';
 require_once __DIR__ . '/config.php';
+require_once __DIR__ . '/src/Support/Http.php';
 header('Content-Type: application/json');
 
 if (!isset($GLOBALS['stats'])) { $GLOBALS['stats'] = ['upserts'=>0,'purges'=>0,'skipped_empty'=>0,'seen'=>0]; }
 
-// Backwards compat: ensure json_input exists even if bootstrap not updated in some environments yet.
-if (!function_exists('json_input')) {
-    function json_input(): array {
-        $raw = file_get_contents('php://input');
-        if ($raw === false || $raw === '') return [];
-        $data = json_decode($raw, true);
-        return is_array($data) ? $data : [];
-    }
-}
+use function Renote\Support\json_input;
+use function Renote\Support\ok;
+use function Renote\Support\fail;
+use function Renote\Support\rl_check;
 
 $action = $_GET['action'] ?? 'state';
 
@@ -22,24 +18,7 @@ if (!function_exists('card_validate_id_and_text')) {
     require_once __DIR__ . '/bootstrap.php'; // ensure helper exists
 }
 
-// Rate limiting helper
-function rl_check($actionKey) {
-    if (!defined('APP_RATE_LIMIT_MAX')) return; // disabled if not defined
-    $ip = $_SERVER['REMOTE_ADDR'] ?? 'ip:unknown';
-    $bucket = (int)(time() / APP_RATE_LIMIT_WINDOW);
-    $key = "rl:$ip:$bucket";
-    try {
-        $r = redis_client();
-        $count = $r->incr($key);
-        if ($count === 1) { $r->expire($key, APP_RATE_LIMIT_WINDOW); }
-        if ($count > APP_RATE_LIMIT_MAX) {
-            fail('rate_limited', 429);
-        }
-    } catch (Throwable $e) { /* soft fail - do not block if redis down */ }
-}
-
-function ok($data = []) { echo json_encode(['ok' => true] + $data); exit; }
-function fail($msg, $code = 400) { http_response_code($code); echo json_encode(['ok' => false, 'error' => $msg]); exit; }
+// Helpers now provided by Renote\Support\Http
 
 switch ($action) {
     case 'state':
