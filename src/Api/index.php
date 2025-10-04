@@ -1,5 +1,5 @@
 <?php
-// API entry logic (organized location). Root api.php includes this.
+// API entry logicpoint: route to organized implementation
 require_once __DIR__ . '/../Support/Bootstrap.php';
 require_once __DIR__ . '/../Support/Http.php';
 

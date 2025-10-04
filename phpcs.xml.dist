@@ -1,11 +1,11 @@
 <?xml version="1.0"?>
 <ruleset name="Renote Coding Standard">
   <description>PSR-12 base with selective exclusions for legacy bootstrap and worker scripts.</description>
-  <file>api.php</file>
-  <file>bootstrap.php</file>
+  <file>src/Api/index.php</file>
+  <file>src/Support/Bootstrap.php</file>
   <file>config.php</file>
-  <file>flush.php</file>
-  <file>index.php</file>
+  <file>bin/flush.php</file>
+  <file>src/Api/index.php</file>
   <file>src</file>
   <exclude-pattern>vendor/*</exclude-pattern>
   <exclude-pattern>tests/*</exclude-pattern>

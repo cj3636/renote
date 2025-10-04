@@ -7,9 +7,9 @@
     </testsuites>
     <coverage processUncoveredFiles="false">
         <include>
-            <file>bootstrap.php</file>
-            <file>api.php</file>
-            <file>flush.php</file>
+            <file>src/Support/Bootstrap.php</file>
+            <file>src/Api/index.php</file>
+            <file>bin/flush.php</file>
         </include>
     </coverage>
 </phpunit>

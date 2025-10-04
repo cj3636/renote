@@ -1,9 +1,9 @@
 parameters:
   level: 5
   paths:
-    - bootstrap.php
-    - api.php
-    - flush.php
+    - src/Support/Bootstrap.php
+    - src/Api/index.php
+    - bin/flush.php
     - src
   excludePaths:
     - legacy
