@@ -39,7 +39,7 @@ header("Content-Security-Policy: default-src 'none'; script-src 'self' 'nonce-$c
   <main class="grid" id="grid" aria-live="polite" aria-busy="false"></main>
 </div>
 <?php echo file_get_contents(__DIR__ . '/inc/modal.html'); ?>
-<script src="js/modern.store.min.js"></script>
+<script src="js/store.js"></script>
 <script src="js/app.js" type="module"></script>
 <script type="module" nonce="<?= $cspNonce ?>">
 // Manual flush button handler

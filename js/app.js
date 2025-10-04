@@ -27,16 +27,16 @@ const historyList = document.getElementById('historyList');
 const flushBtn = document.getElementById('flushBtn');
 
 const API = {
-  state: () => fetch('api.php?action=state').then(r=>r.json()),
-  saveCard: (card) => fetch('api.php?action=save_card', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(card)}).then(r=>r.json()),
-  deleteCard: (id) => fetch('api.php?action=delete_card', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id})}).then(r=>r.json()),
+  state: () => fetch('src/Api/index.php?action=state').then(r=>r.json()),
+  saveCard: (card) => fetch('src/Api/index.php?action=save_card', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(card)}).then(r=>r.json()),
+  deleteCard: (id) => fetch('src/Api/index.php?action=delete_card', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id})}).then(r=>r.json()),
   bulkSave: (cards) => navigator.sendBeacon
-    ? navigator.sendBeacon('api.php?action=bulk_save', new Blob([JSON.stringify({cards})], {type:'application/json'}))
-    : fetch('api.php?action=bulk_save', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({cards}) }),
-  flushOnce: () => fetch('api.php?action=flush_once', {cache:'no-store'}).then(r=>r.json()),
-  history: () => fetch('api.php?action=history', {cache:'no-store'}).then(r=>r.json()),
-  historyPurge: (id)=> fetch('api.php?action=history_purge',{method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id})}).then(r=>r.json()),
-  historyRestore: (id)=> fetch('api.php?action=history_restore',{method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id})}).then(r=>r.json()),
+    ? navigator.sendBeacon('src/Api/index.php?action=bulk_save', new Blob([JSON.stringify({cards})], {type:'application/json'}))
+    : fetch('src/Api/index.php?action=bulk_save', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({cards}) }),
+  flushOnce: () => fetch('src/Api/index.php?action=flush_once', {cache:'no-store'}).then(r=>r.json()),
+  history: () => fetch('src/Api/index.php?action=history', {cache:'no-store'}).then(r=>r.json()),
+  historyPurge: (id)=> fetch('src/Api/index.php?action=history_purge',{method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id})}).then(r=>r.json()),
+  historyRestore: (id)=> fetch('src/Api/index.php?action=history_restore',{method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id})}).then(r=>r.json()),
 };
 
 const uid = () => crypto.randomUUID?.() || (Date.now().toString(36)+Math.random().toString(36).slice(2));
