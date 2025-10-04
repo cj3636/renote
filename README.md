@@ -11,7 +11,7 @@ A minimalist, fast note cards web app. Every keystroke is saved instantly to Red
 ![Language](https://img.shields.io/badge/PHP-8.1%2B-777bb3?logo=php&style=for-the-badge)
 ![Redis](https://img.shields.io/badge/Redis-6%2B-red?logo=redis&style=for-the-badge)
 ![MariaDB](https://img.shields.io/badge/MariaDB-10.5%2B-003545?logo=mariadb&style=for-the-badge)
-![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)
+[![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](LICENSE)
 ![Status](https://img.shields.io/badge/Status-Early%20Release-blue?style=for-the-badge)
 
 ---

@@ -1,6 +1,6 @@
 <?php
 // Worker: flush Redis stream events to MariaDB (write-behind persistence)
-require_once __DIR__ . '/bootstrap.php';
+require_once __DIR__ . '/src/Support/Bootstrap.php';
 
 if (!defined('APP_WRITE_BEHIND') || !APP_WRITE_BEHIND) {
     fwrite(STDERR, "Write-behind disabled. Enable APP_WRITE_BEHIND to use this worker.\n");
