@@ -5,7 +5,7 @@ final class MetricsTest extends TestCase
 {
     protected function setUp(): void
     {
-        require_once __DIR__ . '/../bootstrap.php';
+        require_once __DIR__ . '/src/Support/Bootstrap.php';
         if (!function_exists('metrics_snapshot')) {
             $this->markTestSkipped('metrics_snapshot not available');
         }

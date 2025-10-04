@@ -1,5 +1,5 @@
 <?php
-require_once __DIR__ . '/bootstrap.php';
+require_once __DIR__ . '/src/Support/Bootstrap.php';
 require_once __DIR__ . '/config.php';
 
 // Serve SPA with state from Redis/DB (no legacy filesystem JSON).
@@ -48,8 +48,8 @@ const flushBtn = document.getElementById('flushBtn');
 flushBtn?.addEventListener('click', async ()=> {
   flushBtn.disabled = true;
   try {
-    await fetch('api.php?action=flush_once', {cache:'no-store'});
-    fetch('api.php?action=trim_stream&keep=5000'); // async trim
+    await fetch('src/Api/index.php?action=flush_once', {cache:'no-store'});
+    fetch('src/Api/index.php?action=trim_stream&keep=5000'); // async trim
   } catch(e) {}
   setTimeout(()=>{ flushBtn.disabled=false; }, 800);
 });
@@ -57,7 +57,7 @@ flushBtn?.addEventListener('click', async ()=> {
 
 async function pollHealth() {
   try {
-    const r = await fetch('api.php?action=health', {cache:'no-store'});
+    const r = await fetch('src/Api/index.php?action=health', {cache:'no-store'});
     const j = await r.json();
     const dot = document.getElementById('healthDot');
     if (!dot) return;
