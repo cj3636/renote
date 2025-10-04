@@ -16,11 +16,10 @@ final class ValidationTest extends TestCase
 
     public function testOversizeText(): void
     {
-        if (!defined('APP_CARD_MAX_LEN')) {
-            $this->markTestSkipped('APP_CARD_MAX_LEN not defined');
-        }
+        // Use the same effective limit as the validator: when undefined or <=0, default to 262144
+        $max = (defined('APP_CARD_MAX_LEN') && APP_CARD_MAX_LEN > 0) ? APP_CARD_MAX_LEN : 262144;
         $this->expectException(LengthException::class);
-        $big = str_repeat('x', APP_CARD_MAX_LEN + 1);
+        $big = str_repeat('x', $max + 1);
         card_validate_id_and_text(str_repeat('a',16), $big);
     }
 

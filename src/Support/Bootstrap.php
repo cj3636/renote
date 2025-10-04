@@ -236,7 +236,8 @@ function card_validate_id_and_text(string $id, string $text): void {
       throw new InvalidArgumentException('invalid_id_format');
     }
   }
-  if (defined('APP_CARD_MAX_LEN') && mb_strlen($text) > APP_CARD_MAX_LEN) {
+  $maxLen = (defined('APP_CARD_MAX_LEN') && APP_CARD_MAX_LEN > 0) ? APP_CARD_MAX_LEN : 262144;
+  if (mb_strlen($text) > $maxLen) {
     throw new LengthException('text_too_long');
   }
 }
