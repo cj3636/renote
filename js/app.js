@@ -178,10 +178,14 @@ function finalizeDrag(e) {
     const cards = state.cards.sort((a,b)=>a.order-b.order);
     const byId = Object.fromEntries(cards.map(c=>[c.id,c]));
     ids.forEach((id,i)=>{ const c = byId[id]; if (c) c.order = i; });
+    // Bump updated_at locally to make sure reconcile treats order change as newer
+    const nowSec = Date.now()/1000|0;
+    cards.forEach(c=>{ c.updated_at = nowSec; });
     saveLocal();
-    try { API.bulkSave(cards.map(c=>({id:c.id, text:c.text, order:c.order, name:c.name||''}))); } catch {}
-    const moved = state.cards.find(c=>c.id===movedId);
-    if (moved) queueServerSave(moved);
+    // Force bulk save via fetch (ignore sendBeacon path) so we know it executes.
+    try {
+      fetch('src/Api/index.php?action=bulk_save', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({cards: cards.map(c=>({id:c.id, text:c.text, order:c.order, name:c.name||''}))}) });
+    } catch {}
   }
   // Restore visibility
   if (movedEl) movedEl.style.removeProperty('display');
