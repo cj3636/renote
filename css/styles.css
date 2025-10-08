@@ -213,14 +213,3 @@ body {
 /* Accessibility tweaks */
 @media (prefers-reduced-motion: reduce) { .card, .modal .dialog, .drawer-panel { animation: none; transition: none; } }
 
-.card-handle {
-	padding: 8px 10px;
-	display:flex; align-items:center; gap:8px;
-	background: #0f1622;
-	border-bottom: 1px solid var(--border);
-	border-top-left-radius: var(--radius);
-	border-top-right-radius: var(--radius);
-}
-.card-handle .grab { cursor: grab; font-weight:700; color:#6b7fa8; }
-.card-handle .grab:active { cursor: grabbing; }
-.card-handle .title { flex:1; text-align:center; color:var(--text); opacity:.9; }
