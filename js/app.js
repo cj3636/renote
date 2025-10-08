@@ -192,27 +192,51 @@ function finalizeDrag(e) {
 // Global dragover on grid to allow placeholder at end and live reorder preview
 grid.addEventListener('dragover', (e)=> {
   if (!dragMeta.active) return; e.preventDefault();
-  const after = getDragAfterElement(grid, e.clientY);
-  if (!after) {
-    if (dragMeta.placeholder !== grid.lastElementChild) grid.appendChild(dragMeta.placeholder);
-  } else if (after !== dragMeta.placeholder) {
-    grid.insertBefore(dragMeta.placeholder, after);
+  const ph = dragMeta.placeholder; if (!ph) return;
+  const pointerX = e.clientX; const pointerY = e.clientY;
+  const cards = [...grid.querySelectorAll('.card:not(.dragging)')];
+  if (!cards.length) { grid.appendChild(ph); return; }
+
+  // Build row groupings by vertical center proximity (tolerant clustering)
+  const rows = [];
+  const rowTolerance = 40; // px
+  cards.forEach(card => {
+    const r = card.getBoundingClientRect();
+    const centerY = r.top + r.height/2;
+    let row = rows.find(row => Math.abs(row.centerY - centerY) < rowTolerance);
+    if (!row) { row = { centerY, items: [] }; rows.push(row); }
+    row.items.push({ el: card, rect: r });
+  });
+  rows.sort((a,b)=>a.centerY - b.centerY);
+  rows.forEach(row => row.items.sort((a,b)=>a.rect.left - b.rect.left));
+
+  // Determine target row: closest centerY below pointer OR last row
+  let targetRow = rows[0];
+  for (const row of rows) {
+    if (pointerY >= row.centerY - rowTolerance && pointerY <= row.centerY + rowTolerance) { targetRow = row; break; }
+    if (pointerY > row.centerY) targetRow = row; // fallback to last passed row
+  }
+
+  // Within row decide position by comparing pointerX to item midpoints
+  let insertBefore = null;
+  for (const item of targetRow.items) {
+    const midX = item.rect.left + item.rect.width/2;
+    if (pointerX < midX) { insertBefore = item.el; break; }
+  }
+
+  if (!insertBefore) {
+    // append to end of target row: find last element in that row's DOM order
+    const lastEl = targetRow.items[targetRow.items.length-1].el;
+    // Insert after lastEl (which in DOM means before next sibling of lastEl)
+    if (lastEl.nextSibling !== ph) {
+      if (lastEl.nextSibling) grid.insertBefore(ph, lastEl.nextSibling); else grid.appendChild(ph);
+    }
+  } else if (insertBefore !== ph) {
+    grid.insertBefore(ph, insertBefore);
   }
 });
 
-function getDragAfterElement(container, y) {
-  const draggableElements = [...container.querySelectorAll('.card:not(.dragging), .card-placeholder')].filter(el=>el!==dragMeta.placeholder);
-  let closest = { offset: Number.NEGATIVE_INFINITY, element: null };
-  for (const child of draggableElements) {
-    if (child.classList.contains('card-placeholder')) continue; // skip existing placeholder
-    const box = child.getBoundingClientRect();
-    const offset = y - (box.top + box.height/2);
-    if (offset < 0 && offset > closest.offset) {
-      closest = { offset, element: child };
-    }
-  }
-  return closest.element;
-}
+// Legacy getDragAfterElement removed in favor of row-aware positioning.
 
 // Cancel if ESC pressed during drag
 document.addEventListener('keydown', (e)=>{
