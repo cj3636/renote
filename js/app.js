@@ -58,6 +58,24 @@ const serverSaveDebounced = debounce(async (card)=> {
 let currentId = null;
 let trashArmed = false;
 
+// ===== Drag & Drop meta (new) =====
+let dragMeta = {
+  dragging: null,           // element being dragged (.card)
+  id: null,                 // card id
+  startIndex: -1,           // original index in DOM (visual)
+  placeholder: null,        // placeholder element
+  overEl: null,             // last element we were over
+  active: false,
+  cancel: false
+};
+
+function makePlaceholder(height=0) {
+  const ph = document.createElement('div');
+  ph.className = 'card-placeholder';
+  ph.style.height = height ? height+ 'px' : '';
+  return ph;
+}
+
 // ===== Render grid =====
 function render() {
   grid.innerHTML = '';
@@ -98,32 +116,129 @@ function render() {
       e.dataTransfer.effectAllowed = 'move';
       e.dataTransfer.setData('text/plain', dragId);
       el.classList.add('dragging');
+      // Build placeholder
+      dragMeta.id = card.id;
+      dragMeta.dragging = el;
+      dragMeta.startIndex = [...grid.children].indexOf(el);
+      dragMeta.placeholder = makePlaceholder(el.getBoundingClientRect().height);
+      dragMeta.active = true;
+      dragMeta.cancel = false;
+      // Insert placeholder immediately after dragging el to preserve space
+      el.parentNode.insertBefore(dragMeta.placeholder, el.nextSibling);
+      // Custom drag image (clone mini)
+      const clone = el.cloneNode(true);
+      clone.style.width = el.getBoundingClientRect().width + 'px';
+      clone.style.position = 'absolute';
+      clone.style.top = '-9999px';
+      clone.style.pointerEvents = 'none';
+      clone.style.opacity = '0.85';
+      document.body.appendChild(clone);
+      try { e.dataTransfer.setDragImage(clone, clone.offsetWidth/2, 20); } catch {}
+      setTimeout(()=> clone.remove(), 0);
     });
-    grab.addEventListener('dragend', ()=> { dragId=null; el.classList.remove('dragging'); });
-    // Allow dropping onto any card (drop = finalize reorder)
-    el.addEventListener('dragover', (e)=> { e.preventDefault(); });
-    el.addEventListener('drop', (e)=> {
+    grab.addEventListener('dragend', (e)=> {
+      el.classList.remove('dragging');
+      finalizeDrag(e);
+    });
+    // Card level dragover used for dynamic placeholder reposition
+    el.addEventListener('dragover', (e)=> {
+      if (!dragMeta.active) return; 
       e.preventDefault();
-      const srcId = dragId || e.dataTransfer.getData('text/plain');
-      if (!srcId || srcId === card.id) return;
-      reorder(srcId, card.id);
+      const draggingId = dragMeta.id;
+      if (!draggingId || el.dataset.id === draggingId) return;
+      const rect = el.getBoundingClientRect();
+      const before = (e.clientY - rect.top) < rect.height/2; // vertical midpoint heuristic
+      const currentChildren = [...grid.children].filter(c=>c!==dragMeta.dragging && c!==dragMeta.placeholder);
+      // Determine desired index
+      const targetIndex = currentChildren.indexOf(el) + (before?0:1);
+      const phIndex = [...grid.children].indexOf(dragMeta.placeholder);
+      if (phIndex === targetIndex) return; // already there
+      // Insert at calculated position
+      if (targetIndex >= currentChildren.length) {
+        grid.appendChild(dragMeta.placeholder);
+      } else {
+        grid.insertBefore(dragMeta.placeholder, currentChildren[targetIndex]);
+      }
     });
   });
 }
 
-function reorder(srcId, tgtId) {
-  const cards = state.cards;
-  const srcIdx = cards.findIndex(c=>c.id===srcId);
-  const tgtIdx = cards.findIndex(c=>c.id===tgtId);
-  if (srcIdx<0 || tgtIdx<0 || srcIdx===tgtIdx) return;
+function applyVisualReorder() {
+  if (!dragMeta.active || !dragMeta.placeholder) return;
+  const phIndex = [...grid.children].indexOf(dragMeta.placeholder);
+  const originalIndex = dragMeta.startIndex;
+  if (phIndex < 0 || phIndex === originalIndex) return; // no movement
+  // Reorder state.cards visually only (not saving yet)
+  const cards = state.cards.sort((a,b)=>a.order-b.order);
+  const srcIdx = cards.findIndex(c=>c.id===dragMeta.id);
+  if (srcIdx < 0) return;
   const [moved] = cards.splice(srcIdx,1);
-  cards.splice(tgtIdx,0,moved);
-  cards.forEach((c,i)=>c.order=i);
-  saveLocal();
-  // Persist all order changes (not just moved card) so server stays consistent
-  try { API.bulkSave(cards.map(c=>({id:c.id, text:c.text, order:c.order, name:c.name||''}))); } catch {}
-  queueServerSave(moved); // also send single save for immediacy
-  render(); // re-render after drop only
+  const insertIdx = phIndex > srcIdx ? phIndex-1 : phIndex; // adjust for removal offset
+  cards.splice(insertIdx,0,moved);
+  cards.forEach((c,i)=>c.order = i + 0.0001); // temporary fractional orders to detect unsaved
+  render();
+  // Mark the newly rendered dragging element again
+  const newDragging = grid.querySelector(`.card[data-id="${dragMeta.id}"]`);
+  if (newDragging) {
+    newDragging.classList.add('dragging');
+  }
+}
+
+function finalizeDrag(e) {
+  if (!dragMeta.active) return;
+  const movedId = dragMeta.id;
+  const ph = dragMeta.placeholder;
+  const droppedOverGrid = e && grid.contains(ph);
+  if (droppedOverGrid) {
+    // Commit final order based on placeholder index
+    const phIndex = [...grid.children].indexOf(ph);
+    const cards = state.cards.sort((a,b)=>a.order-b.order);
+    const srcIdx = cards.findIndex(c=>c.id===movedId);
+    if (srcIdx>=0 && phIndex>=0) {
+      const [moved] = cards.splice(srcIdx,1);
+      const insertIdx = phIndex > srcIdx ? phIndex-1 : phIndex;
+      cards.splice(insertIdx,0,moved);
+      cards.forEach((c,i)=>c.order=i);
+      saveLocal();
+      try { API.bulkSave(cards.map(c=>({id:c.id, text:c.text, order:c.order, name:c.name||''}))); } catch {}
+      queueServerSave(cards.find(c=>c.id===movedId));
+      render();
+    }
+  } else {
+    // Cancel: simply re-render to original
+    render();
+  }
+  // Cleanup
+  ph?.remove();
+  dragMeta = { dragging:null, id:null, startIndex:-1, placeholder:null, overEl:null, active:false, cancel:false };
+}
+
+// Global dragover on grid to allow placeholder at end and live reorder preview
+grid.addEventListener('dragover', (e)=> {
+  if (!dragMeta.active) return;
+  e.preventDefault();
+  const afterElement = getDragAfterElement(grid, e.clientY);
+  if (afterElement == null) {
+    if (dragMeta.placeholder && dragMeta.placeholder.parentNode !== grid) grid.appendChild(dragMeta.placeholder);
+    else if (dragMeta.placeholder) grid.appendChild(dragMeta.placeholder);
+  } else if (afterElement !== dragMeta.placeholder) {
+    grid.insertBefore(dragMeta.placeholder, afterElement);
+  }
+  applyVisualReorder();
+});
+
+function getDragAfterElement(container, y) {
+  const draggableElements = [...container.querySelectorAll('.card:not(.dragging), .card-placeholder')].filter(el=>el!==dragMeta.placeholder);
+  let closest = { offset: Number.NEGATIVE_INFINITY, element: null };
+  for (const child of draggableElements) {
+    if (child.classList.contains('card-placeholder')) continue; // skip existing placeholder
+    const box = child.getBoundingClientRect();
+    const offset = y - (box.top + box.height/2);
+    if (offset < 0 && offset > closest.offset) {
+      closest = { offset, element: child };
+    }
+  }
+  return closest.element;
 }
 
 // ===== Modal =====
