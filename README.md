@@ -1,6 +1,6 @@
 # Renote
 
-A minimalist, fast note cards web app. Every keystroke is saved instantly to Redis (hot working set) and persisted asynchronously to MariaDB via a write‑behind stream worker. Offline‑friendly (localStorage), dark UI, drag & drop ordering, soft delete with recovery history.
+ A minimalist, fast note cards web app. Every keystroke is saved instantly to Redis (hot working set) and persisted asynchronously to MariaDB via a write‑behind stream worker. Offline‑friendly (localStorage), modern glassmorphic dark UI, precise drag & drop ordering (placeholder + commit on drop), soft delete with recovery history.
 
 
 
@@ -40,12 +40,13 @@ A minimalist, fast note cards web app. Every keystroke is saved instantly to Red
 
 - Instant persistence: localStorage + Redis per keystroke (debounced network ~450ms)
 - Asynchronous durability via Redis Streams → MariaDB write‑behind worker
-- Dark single‑page UI (no framework) with semantic HTML & minimal JS
-- Draggable ordering (handle only) with bulk order synchronization to avoid divergence
+- Dark single‑page UI (no framework) with glass / blur aesthetic & minimal JS
+- Precision drag & drop (handle only) with real‑time placeholder and commit‑on‑drop bulk order sync
 - Modal editor with fullscreen toggle and double‑confirm delete
 - Optional card name (title) + automatic blurb preview (first sentence)
 - Soft delete: removed from Redis but recoverable from MariaDB until flush purges
 - History drawer (UI) to restore or purge DB‑only cards
+- Flush button (debug mode) now also triggers an immediate state re‑sync after write‑behind flush
 - Health indicator (lag classification: ok / degraded / backlog)
 - Adaptive stream flush batch sizing
 - Stream trimming to prevent unbounded growth
@@ -58,14 +59,14 @@ Assumes: PHP 8.1+, Redis, MariaDB running locally (TCP or sockets). For quick ex
 
 1. Create your env file
 
-```
+```bash
 cp .env.example .env
 # Edit .env with Redis/MariaDB credentials (never commit real secrets)
 ```
 
 2. Install dependencies
 
-```
+```bash
 composer install
 ```
 
@@ -85,7 +86,7 @@ CREATE TABLE IF NOT EXISTS cards (
 
 4. Run a PHP dev server (or use Apache/Nginx):
 
-```
+```bash
 php -S localhost:8080 index.php
 ```
 
@@ -93,7 +94,7 @@ php -S localhost:8080 index.php
 
 6. Manually flush (in debug mode) via the ⟳ button or CLI:
 
-```
+```bash
 php flush.php --once
 ```
 
@@ -107,7 +108,7 @@ Recommend Nginx → PHP‑FPM. Place project in `/var/www/renote` (or similar). 
 
 Example Nginx server block (minimal):
 
-```
+```nginx
 server {
   listen 80;
   server_name notes.example.com;
@@ -128,7 +129,7 @@ server {
 
 `docs/renote.service` (oneshot) and `docs/renote.timer` are provided. Install & enable:
 
-```
+```bash
 sudo cp docs/renote.service docs/renote.timer /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now renote.timer
@@ -253,7 +254,7 @@ Systemd health timer (`docs/renote-health.service` / `.timer`) can curl the heal
 
 Composer dev dependencies (after update): phpstan, phpunit, php-cs-fixer.
 
-```
+```bash
 composer install
 composer run lint     # (if script added)
 composer test
@@ -328,7 +329,7 @@ PRs welcome. Please run linting & tests before submitting. For larger changes op
 
 ## Quick Dev Commands (Reference)
 
-```
+```bash
 # Run worker once (batch mode)
 php flush.php --once --quiet
 
