@@ -60,13 +60,12 @@ let trashArmed = false;
 
 // ===== Drag & Drop meta (new) =====
 let dragMeta = {
-  dragging: null,           // element being dragged (.card)
-  id: null,                 // card id
-  startIndex: -1,           // original index in DOM (visual)
-  placeholder: null,        // placeholder element
-  overEl: null,             // last element we were over
+  dragging: null,           // original element
+  id: null,
+  startIndex: -1,
+  placeholder: null,
   active: false,
-  cancel: false
+  committed: false
 };
 
 function makePlaceholder(height=0) {
@@ -163,68 +162,42 @@ function render() {
   });
 }
 
-function applyVisualReorder() {
-  if (!dragMeta.active || !dragMeta.placeholder) return;
-  const phIndex = [...grid.children].indexOf(dragMeta.placeholder);
-  const originalIndex = dragMeta.startIndex;
-  if (phIndex < 0 || phIndex === originalIndex) return; // no movement
-  // Reorder state.cards visually only (not saving yet)
-  const cards = state.cards.sort((a,b)=>a.order-b.order);
-  const srcIdx = cards.findIndex(c=>c.id===dragMeta.id);
-  if (srcIdx < 0) return;
-  const [moved] = cards.splice(srcIdx,1);
-  const insertIdx = phIndex > srcIdx ? phIndex-1 : phIndex; // adjust for removal offset
-  cards.splice(insertIdx,0,moved);
-  cards.forEach((c,i)=>c.order = i + 0.0001); // temporary fractional orders to detect unsaved
-  render();
-  // Mark the newly rendered dragging element again
-  const newDragging = grid.querySelector(`.card[data-id="${dragMeta.id}"]`);
-  if (newDragging) {
-    newDragging.classList.add('dragging');
-  }
-}
+// Removed continuous visual reorders to prevent flicker – we only move placeholder.
 
 function finalizeDrag(e) {
   if (!dragMeta.active) return;
-  const movedId = dragMeta.id;
   const ph = dragMeta.placeholder;
-  const droppedOverGrid = e && grid.contains(ph);
-  if (droppedOverGrid) {
-    // Commit final order based on placeholder index
-    const phIndex = [...grid.children].indexOf(ph);
+  const movedEl = dragMeta.dragging;
+  const movedId = dragMeta.id;
+  const validDrop = e && ph && grid.contains(ph);
+  if (validDrop) {
+    // Place original element where placeholder sits
+    grid.insertBefore(movedEl, ph);
+    // Compute new order from DOM sequence
+    const ids = [...grid.querySelectorAll('.card')].map(c=>c.dataset.id);
     const cards = state.cards.sort((a,b)=>a.order-b.order);
-    const srcIdx = cards.findIndex(c=>c.id===movedId);
-    if (srcIdx>=0 && phIndex>=0) {
-      const [moved] = cards.splice(srcIdx,1);
-      const insertIdx = phIndex > srcIdx ? phIndex-1 : phIndex;
-      cards.splice(insertIdx,0,moved);
-      cards.forEach((c,i)=>c.order=i);
-      saveLocal();
-      try { API.bulkSave(cards.map(c=>({id:c.id, text:c.text, order:c.order, name:c.name||''}))); } catch {}
-      queueServerSave(cards.find(c=>c.id===movedId));
-      render();
-    }
-  } else {
-    // Cancel: simply re-render to original
-    render();
+    const byId = Object.fromEntries(cards.map(c=>[c.id,c]));
+    ids.forEach((id,i)=>{ const c = byId[id]; if (c) c.order = i; });
+    saveLocal();
+    try { API.bulkSave(cards.map(c=>({id:c.id, text:c.text, order:c.order, name:c.name||''}))); } catch {}
+    const moved = state.cards.find(c=>c.id===movedId);
+    if (moved) queueServerSave(moved);
   }
-  // Cleanup
+  // Restore visibility
+  if (movedEl) movedEl.style.removeProperty('display');
   ph?.remove();
-  dragMeta = { dragging:null, id:null, startIndex:-1, placeholder:null, overEl:null, active:false, cancel:false };
+  dragMeta = { dragging:null, id:null, startIndex:-1, placeholder:null, active:false, committed:false };
 }
 
 // Global dragover on grid to allow placeholder at end and live reorder preview
 grid.addEventListener('dragover', (e)=> {
-  if (!dragMeta.active) return;
-  e.preventDefault();
-  const afterElement = getDragAfterElement(grid, e.clientY);
-  if (afterElement == null) {
-    if (dragMeta.placeholder && dragMeta.placeholder.parentNode !== grid) grid.appendChild(dragMeta.placeholder);
-    else if (dragMeta.placeholder) grid.appendChild(dragMeta.placeholder);
-  } else if (afterElement !== dragMeta.placeholder) {
-    grid.insertBefore(dragMeta.placeholder, afterElement);
+  if (!dragMeta.active) return; e.preventDefault();
+  const after = getDragAfterElement(grid, e.clientY);
+  if (!after) {
+    if (dragMeta.placeholder !== grid.lastElementChild) grid.appendChild(dragMeta.placeholder);
+  } else if (after !== dragMeta.placeholder) {
+    grid.insertBefore(dragMeta.placeholder, after);
   }
-  applyVisualReorder();
 });
 
 function getDragAfterElement(container, y) {
@@ -240,6 +213,14 @@ function getDragAfterElement(container, y) {
   }
   return closest.element;
 }
+
+// Cancel if ESC pressed during drag
+document.addEventListener('keydown', (e)=>{
+  if (e.key==='Escape' && dragMeta.active) {
+    finalizeDrag(null); // cancels
+    render(); // restore canonical order
+  }
+});
 
 // ===== Modal =====
 function openModal(id) {
