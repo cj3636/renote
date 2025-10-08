@@ -58,7 +58,7 @@ const serverSaveDebounced = debounce(async (card)=> {
 let currentId = null;
 let trashArmed = false;
 
-// ===== Drag & Drop meta (new) =====
+// ===== Drag & Drop meta =====
 let dragMeta = {
   dragging: null,           // original element
   id: null,
@@ -107,8 +107,8 @@ function render() {
     blurb.addEventListener('click', ()=> openModal(card.id));
 
     // ---- Drag & Drop (handle-only) ----
-    // We drag the small grab element but move the entire card on drop.
-    let dragId=null;
+  // We drag only via the grab handle. The card itself is moved on drop.
+  let dragId=null;
     grab.setAttribute('draggable','true');
     grab.addEventListener('dragstart', (e)=> {
       dragId = card.id;
@@ -121,7 +121,6 @@ function render() {
       dragMeta.startIndex = [...grid.children].indexOf(el);
       dragMeta.placeholder = makePlaceholder(el.getBoundingClientRect().height);
       dragMeta.active = true;
-      dragMeta.cancel = false;
       // Insert placeholder immediately after dragging el to preserve space
       el.parentNode.insertBefore(dragMeta.placeholder, el.nextSibling);
       // Custom drag image (clone mini)
@@ -139,26 +138,7 @@ function render() {
       el.classList.remove('dragging');
       finalizeDrag(e);
     });
-    // Card level dragover used for dynamic placeholder reposition
-    el.addEventListener('dragover', (e)=> {
-      if (!dragMeta.active) return; 
-      e.preventDefault();
-      const draggingId = dragMeta.id;
-      if (!draggingId || el.dataset.id === draggingId) return;
-      const rect = el.getBoundingClientRect();
-      const before = (e.clientY - rect.top) < rect.height/2; // vertical midpoint heuristic
-      const currentChildren = [...grid.children].filter(c=>c!==dragMeta.dragging && c!==dragMeta.placeholder);
-      // Determine desired index
-      const targetIndex = currentChildren.indexOf(el) + (before?0:1);
-      const phIndex = [...grid.children].indexOf(dragMeta.placeholder);
-      if (phIndex === targetIndex) return; // already there
-      // Insert at calculated position
-      if (targetIndex >= currentChildren.length) {
-        grid.appendChild(dragMeta.placeholder);
-      } else {
-        grid.insertBefore(dragMeta.placeholder, currentChildren[targetIndex]);
-      }
-    });
+    // (Per-card dragover no longer needed; global grid handler manages placeholder.)
   });
 }
 
@@ -454,3 +434,8 @@ setInterval(()=>reconcileWithServer(false), 15000); // every 15s
 
 // If page loaded with no titles (all blank) attempt an earlier quick sync
 if (state.cards.some(c=>!c.name)) { reconcileWithServer(false); }
+
+// Manual force sync (triggered after flush button completes on server)
+window.addEventListener('renote:force-sync', ()=> {
+  reconcileWithServer(true);
+});
