@@ -50,6 +50,8 @@ flushBtn?.addEventListener('click', async ()=> {
   try {
     await fetch('src/Api/index.php?action=flush_once', {cache:'no-store'});
     fetch('src/Api/index.php?action=trim_stream&keep=5000'); // async trim
+    // After flushing write-behind to DB, force a state sync so ordering & data are fresh
+    window.dispatchEvent(new Event('renote:force-sync'));
   } catch(e) {}
   setTimeout(()=>{ flushBtn.disabled=false; }, 800);
 });
