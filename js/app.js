@@ -42,7 +42,22 @@ const API = {
 };
 
 const uid = () => crypto.randomUUID?.() || (Date.now().toString(36)+Math.random().toString(36).slice(2));
-const firstSentence = (t) => { if (!t) return ''; const m = t.match(/[^.!?]*[.!?]/); return (m?m[0]:t).trim(); };
+// Multi-line preview: take text, normalize whitespace, take first N lines/characters
+const previewSnippet = (t, maxLines=9, maxChars=600) => {
+  if (!t) return '';
+  // Normalize newlines
+  const lines = t.replace(/\r\n?/g, '\n').split('\n');
+  const trimmed = [];
+  for (const line of lines) {
+    if (trimmed.length >= maxLines) break;
+    // Collapse internal excessive whitespace
+    trimmed.push(line.trimEnd());
+    if (trimmed.join('\n').length > maxChars) break;
+  }
+  let out = trimmed.join('\n');
+  if (out.length > maxChars) out = out.slice(0, maxChars - 1) + '…';
+  return out;
+};
 const debounce = (fn, ms=400)=>{ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), ms); }; };
 const serverSaveDebounced = debounce(async (card)=> {
   try {
@@ -98,7 +113,7 @@ function render() {
 
     const blurb = document.createElement('div');
     blurb.className = 'card-blurb';
-    blurb.textContent = firstSentence(card.text) || '…';
+  blurb.textContent = previewSnippet(card.text) || '…';
 
     el.appendChild(handle);
     el.appendChild(blurb);
@@ -267,7 +282,7 @@ editor?.addEventListener('input', ()=>{
   saveLocal();
   queueServerSave(card);
   const el = grid.querySelector(`.card[data-id="${card.id}"] .card-blurb`);
-  if (el) el.textContent = firstSentence(card.text) || '…';
+  if (el) el.textContent = previewSnippet(card.text) || '…';
 });
 
 // Save name on blur & Enter
@@ -333,12 +348,19 @@ historyBtn?.addEventListener('click', async ()=>{
   try{
     const {orphans=[]} = await API.history();
     historyList.innerHTML = '';
-    // Build tabs container if not present
-    if (!historyList.parentElement.querySelector('.history-tabs')) {
+    // Build tabs inside drawer header if not present
+    const drawerHeader = drawer.querySelector('.drawer-header');
+    if (drawerHeader && !drawerHeader.querySelector('.history-tabs')) {
       const tabs = document.createElement('div');
-      tabs.className='history-tabs';
+      tabs.className='history-tabs inline';
       tabs.innerHTML = `<button class="icon-btn tab active" data-tab="orphans" title="Deleted cards still in DB">Deleted</button><button class="icon-btn tab" data-tab="versions" title="Per-card snapshots">Versions</button>`;
-      historyList.parentElement.prepend(tabs);
+      // Insert tabs before the spacer/close if we add a spacer
+      // Create a spacer to push close button right if not present
+      if (!drawerHeader.querySelector('.header-spacer')) {
+        const spacer = document.createElement('div'); spacer.className='header-spacer';
+        drawerHeader.insertBefore(spacer, drawerHeader.lastElementChild);
+      }
+      drawerHeader.insertBefore(tabs, drawerHeader.querySelector('.header-spacer'));
       tabs.querySelectorAll('.tab').forEach(t=> t.addEventListener('click', (e)=>{
         tabs.querySelectorAll('.tab').forEach(b=>b.classList.remove('active')); e.currentTarget.classList.add('active');
         const tab = e.currentTarget.getAttribute('data-tab');
@@ -351,7 +373,7 @@ historyBtn?.addEventListener('click', async ()=>{
       versionsPanel.className='versions-panel';
       versionsPanel.style.display='none';
       versionsPanel.innerHTML = `<div class="versions-header"><select id="versionsCardSelect"></select><button class="icon-btn" id="snapshotBtn">Snapshot Now</button></div><div id="versionsList" class="versions-list muted">Select a card to load versions…</div><div id="versionDiff" class="version-diff"></div>`;
-      historyList.parentElement.appendChild(versionsPanel);
+  historyList.parentElement.appendChild(versionsPanel);
       // Populate select with current in-memory cards
       const select = versionsPanel.querySelector('#versionsCardSelect');
       state.cards.sort((a,b)=>a.order-b.order).forEach(c=>{
