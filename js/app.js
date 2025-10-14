@@ -337,7 +337,7 @@ historyBtn?.addEventListener('click', async ()=>{
     if (!historyList.parentElement.querySelector('.history-tabs')) {
       const tabs = document.createElement('div');
       tabs.className='history-tabs';
-      tabs.innerHTML = `<button class="icon-btn tab active" data-tab="orphans">Deleted</button><button class="icon-btn tab" data-tab="versions">Versions</button>`;
+      tabs.innerHTML = `<button class="icon-btn tab active" data-tab="orphans" title="Deleted cards still in DB">Deleted</button><button class="icon-btn tab" data-tab="versions" title="Per-card snapshots">Versions</button>`;
       historyList.parentElement.prepend(tabs);
       tabs.querySelectorAll('.tab').forEach(t=> t.addEventListener('click', (e)=>{
         tabs.querySelectorAll('.tab').forEach(b=>b.classList.remove('active')); e.currentTarget.classList.add('active');
@@ -396,6 +396,12 @@ historyBtn?.addEventListener('click', async ()=>{
   }catch{ alert('History load failed'); }
 });
 closeHistory?.addEventListener('click', ()=>{ drawer.classList.add('hidden'); drawer.setAttribute('aria-hidden','true'); });
+// Backdrop outside click to close (history drawer)
+drawer?.addEventListener('click', (e)=>{
+  if (e.target && e.target.classList.contains('drawer-backdrop')) {
+    drawer.classList.add('hidden'); drawer.setAttribute('aria-hidden','true');
+  }
+});
 
 async function loadVersions(cardId){
   if(!cardId) return; versionsState.cardId = cardId; const listEl = versionsPanel.querySelector('#versionsList'); listEl.textContent='Loading versions…';

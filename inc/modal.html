@@ -16,11 +16,12 @@
 </div>
 
 <!-- History drawer -->
-<div id="historyDrawer" class="drawer hidden" aria-hidden="true">
-  <div class="drawer-panel">
+<div id="historyDrawer" class="drawer hidden" aria-hidden="true" role="dialog" aria-modal="true">
+  <div class="drawer-backdrop" data-close="1"></div>
+  <div class="drawer-panel" role="document">
     <div class="drawer-header">
-      <strong>DB History (not in Redis)</strong>
-      <button id="closeHistory" class="icon-btn" aria-label="Close">×</button>
+      <strong class="drawer-title">History & Versions</strong>
+      <button id="closeHistory" class="icon-btn close unified-close" aria-label="Close" title="Close">×</button>
     </div>
     <div id="historyList" class="drawer-body"></div>
   </div>
