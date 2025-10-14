@@ -1,68 +1,126 @@
-# AI Assistant Guide (Renote)
+<!--
+AI-Facing Project Guide (Renote)
+Purpose: Enable an automated AI agent to make SMALL & SAFE changes without rereading the whole repo. For anything structurally large (schema changes, major refactors) READ README.md fully.
+Keep answers/action biased toward: correctness > latency > brevity. Avoid speculative abstraction.
+-->
 
-Goal: Small, focused note card app. Priorities: data integrity, minimal latency, simple code. Avoid speculative complexity.
+# Renote: AI Assistant Cheat Sheet
 
-## Architecture Snapshot
-Frontend: `index.php` + `app.js` (vanilla JS, localStorage cache + periodic reconciliation).  
-Backend: `api.php` (JSON actions), `bootstrap.php` (clients + helpers), `config.php` (env→constants), `flush.php` (write‑behind worker).  
-Data: Redis (hash `card:<id>`, zset `cards:index`, stream `cards:stream`) + MariaDB `cards` table for durability.
+Core Goal: Minimalist note cards app. Priorities: data integrity, low latency, tiny code surface, predictable behavior.
 
-## Configuration
-All runtime config via `.env` → constants in `config.php` (see `.env.example`). Add new tunables as ENV first; keep constant names stable for legacy code. Never hard‑code secrets.
+## 1. High-Level Architecture
+Frontend: `index.php` + `js/{store,app}.js` (vanilla, localStorage cache, debounced saves ~450ms).  
+Backend API: `src/Api/index.php` (single action switch) + helpers in `src/Support/*`.  
+Config: Environment variables loaded in `config.php` mapped to stable constants (NEVER hard‑code secrets).  
+Persistence: Redis = hot authoritative working set. MariaDB = durability (write‑behind by stream worker in `bin/flush.php` when `APP_WRITE_BEHIND=true`).
 
-Key ENV groups: Redis (REDIS_*), DB (DB_*), Worker (WORKER_*/BATCH_FLUSH_EXPECTED_INTERVAL), Limits & Validation (APP_CARD_MAX_LEN etc.).
+## 2. Data Model
+Redis hash `card:<id>` fields: `name` (optional), `text` (canonical body), legacy mirror `txt`, `order` (int), `updated_at` (int epoch).  
+Sorted set `cards:index` scores = `order` for ordering.  
+Stream `cards:stream` for write-behind (fields include id/name/text/order/updated_at or deletion marker).  
+MariaDB table `cards(id, name, txt, order, updated_at)` mirrors Redis hash (text stored as `txt`).  
+Client Card Object shape (API/state): `{ id, name, text, order, updated_at }`.
 
-## Card Object Fields
-`{ id, name, text, order, updated_at }`  
-`name` optional; `text` is canonical content. `updated_at` from server used for conflict & deletion reconciliation.
+## 3. Runtime Flow (Save Path)
+User types → debounce → `save_card` → API validates → update Redis hash + zset, increments metrics, sets `cards:updated_at`, optionally appends stream entry → client sets new `updated_at` from response.
+Delete: API removes hash + zset only (soft); worker later purges DB on absence OR manual restore uses DB row.
 
-## API Actions
-state, save_card, bulk_save, delete_card, history, history_restore, history_purge, flush_once, trim_stream, health, metrics.  
-All responses: `{ ok: true, ... }` or `{ ok:false, error }`.  
-Rejects malformed JSON (`invalid_json`). Enforce ID & length validation.
+## 4. API Actions (src/Api/index.php)
+All responses JSON: success `{ ok:true, ... }`; failure `{ ok:false, error }`. Invalid JSON => `invalid_json` via `fail()`.
+Actions: `state`, `save_card`, `bulk_save`, `delete_card`, `history`, `history_restore` (debug), `history_purge` (debug), `flush_once` (debug), `trim_stream` (debug), `health`, `metrics`.
+Additions: Keep switch readable; slot new action alphabetically when reasonable; use helper functions (prefer small pure functions, early returns).
 
-## Worker Behavior (flush.php)
-Batches stream entries; coalesces by id; upserts or deletes DB row if Redis hash missing or prunable (empty text & pruning enabled). Updates lag metadata keys and trims stream approximately.
+## 5. Validation & Limits
+ID formats: hex 16–64 chars OR UUID v4; enforce UUID only if `APP_REQUIRE_UUID=true`.  
+Length: `card_validate_id_and_text` enforces `APP_CARD_MAX_LEN` (default 262144).  
+Rate limiting: If `APP_RATE_LIMIT_MAX` set, `rl_check()` (currently available) can be inserted in mutating endpoints (lightweight, soft‑fail if Redis down).  
+Malformed JSON: must raise `invalid_json` (handled in `Renote\Support\json_input`).
 
-## Sync & Deletion Semantics
-Client reconciliation merges remote cards; updates local on newer `updated_at`; prunes cards missing remotely if previously synced (grace ~5s). Saves are debounced (~450ms) and update `updated_at` after server ACK.
+## 6. Worker (bin/flush.php)
+Consumes stream (batched `XRANGE` / optional `XREAD` blocking), coalesces by card id (`$FLUSH_QUEUE`).  
+On commit: Upsert existing Redis-backed cards; delete DB row if Redis hash missing or prunable (`APP_PRUNE_EMPTY` + length < `APP_EMPTY_MINLEN`).  
+Maintains `REDIS_STREAM_LAST` & `cards:last_flush_ts`; trims stream approximately (`XTRIM ~`).  
+Stats keys: `metrics:saves`, `metrics:deletes` (simple counters incremented during Redis mutations, not in DB worker).  
+Do NOT add per-event DB writes; batch inside transaction.
 
-## Coding Style / Practices
-- PHP: PSR-12, explicit `declare(strict_types=1);` on new files where safe.  
-- Use small pure functions; keep global helpers in namespaced support files (e.g. `Renote\Support\Http`).  
-- Prefer early returns & guard clauses.  
-- Keep API action switch cohesive; add new actions alphabetically if reasonable.  
-- Do not introduce frameworks unless explicit request.
+## 7. Configuration Patterns
+All tunables live in environment -> constants. When adding a new knob:  
+1. Add env name (UPPER_SNAKE) fallback in `config.php`.  
+2. Reference the constant (NOT getenv inline) elsewhere.  
+3. Document briefly in README & `.env.example` (and here only if essential for small changes).
 
-## Adding Features Checklist
-1. Update data model (Redis hash + DB schema) if needed.  
-2. Extend API payload & validation.  
-3. Adjust `app.js` state shape & rendering.  
-4. Add tests (validation, persistence).  
-5. Update `.env.example` & README sections.  
-6. Document changes in CHANGELOG.
+Key Groups:  
+Redis: `REDIS_*`  
+DB: `DB_*`  
+Worker: `APP_WRITE_BEHIND`, `APP_WRITE_BEHIND_MODE`, `APP_STREAM_MAXLEN`, `WORKER_*`  
+Health Thresholds: `WORKER_MIN_OK_LAG`, `WORKER_MIN_DEGRADED_LAG`, `BATCH_FLUSH_EXPECTED_INTERVAL`  
+Validation: `APP_CARD_MAX_LEN`, `APP_REQUIRE_UUID`, `PRUNE_EMPTY`, `EMPTY_MINLEN`  
+Rate Limit: `RATE_LIMIT_WINDOW`, `RATE_LIMIT_MAX`  
+Debug: `APP_DEBUG`
 
-## Safety & Security
-- All dynamic script data via JSON script tag sanitized by `safe_json_for_script`.  
-- Rate limiting relies on Redis; handle failure gracefully (do not block).  
-- Keep text output escaped by using `textContent` on client.  
-- Avoid executing or rendering HTML inside notes unless sanitizer added.
+## 8. Coding Style & Conventions
+Language: PHP 8+ (see composer platform config).  
+Style: PSR-12 (use php-cs-fixer / phpcs; run before committing).  
+`declare(strict_types=1);` for NEW files when safe (existing legacy globals kept lenient).  
+Prefer: small pure functions; pipeline Redis calls for sets of keys; early returns; explicit casts.  
+No frameworks or heavy deps without explicit instruction.  
+Keep global helper functions in `Support/Bootstrap.php` until a justified refactor—avoid premature abstraction.  
+When adding repository methods, keep `CardRepository` thin (wrapper only); first implement global then wrap.
 
-## Performance Notes
-- Debounce threshold: keep ≥350ms to balance network vs perceived latency.  
-- Avoid N+1 Redis calls (use pipeline).  
-- Stream trimming approximate for speed; adjust `APP_STREAM_MAXLEN` for retention.
+## 9. Testing
+Location: `tests/*.php` (PHPUnit).  
+Add tests for: validation (invalid IDs, length), state shape changes, metrics, new endpoints.  
+If a feature depends on Redis, gracefully skip when Redis unavailable (see existing tests).  
+Minimal new test template: ensure side effects in Redis and response shape.
 
-## When Unsure
-Prefer minimal incremental change with doc comments. Surface tradeoffs instead of large refactors. Ask only when blocked by missing domain context.
+## 10. Performance Notes
+Keep save debounce ≥350ms to reduce network thrash while feeling instant.  
+Batch Redis operations (pipeline) for loops.  
+Stream trimming is approximate; adjust `APP_STREAM_MAXLEN` not per-call micro-optimizations.  
+Avoid per-keystroke DB writes—respect write-behind path unless explicitly toggled off.
 
-## Do NOT
-- Add heavy dependencies for trivial tasks.  
-- Break constant names consumed elsewhere without mapping.  
-- Store secrets in repo.
+## 11. Security & Safety
+Output embedding: always use `safe_json_for_script` for server->DOM data injection.  
+Never echo unsanitized user text as HTML—frontend uses `textContent`.  
+Rate limiting optional; do not make features hard-fail if Redis errors (fail open for RL).  
+Preserve CSP (nonce pattern) if modifying script tags in `index.php`.  
+Do not introduce HTML rendering of notes (XSS risk) unless adding a sanitizer (then document here + README).
 
-## Quick References
-Redis Keys: `cards:index`, `cards:updated_at`, `cards:stream`, `cards:stream:lastid`, `cards:last_flush_ts`  
-Primary Helpers: `load_state()`, `redis_upsert_card()`, `delete_card_redis_only()`, `db_orphans()`, `metrics_snapshot()`
+## 12. Making Small Changes (Examples)
+Add a new field stored with each card:  
+1. Confirm DB schema supports it (if not, this is NOT a small change → read README & migrate).  
+2. Add to Redis hash writes (`redis_upsert_card` & hydration in `load_state`).  
+3. Include in API responses (`save_card`, `bulk_save`, `state`).  
+4. Update client state handling & rendering.  
+5. Add/adjust validation if needed.  
+6. Add test ensuring round-trip.
 
-End of guide.
+Add new API action:  
+1. Add case in switch (alphabetical if sensible).  
+2. Parse input via `json_input()`.  
+3. Validate early & respond with `fail()` on error.  
+4. Return structured data via `ok()`.  
+5. Add test.  
+6. Document briefly in README API table (larger context) if non-trivial.
+
+## 13. When to Escalate (Read README)
+If change impacts: DB schema, write-behind algorithm, concurrency semantics, security model, deployment/systemd, or introduces rich text / search / multi-user → read full README for context & constraints.
+
+## 14. Anti-Patterns (Avoid)
+- Adding ORM / framework.  
+- Expanding global state without necessity.  
+- Synchronous DB writes on every keystroke when write-behind active.  
+- Silent catch of broad exceptions without logging (except where explicitly documented as soft-fail e.g. rate limit).  
+- Mixing HTML in note text logic.
+
+## 15. Quick References
+Primary Helpers: `load_state()`, `redis_upsert_card()`, `delete_card_redis_only()`, `metrics_snapshot()`, `db_orphans()`, `card_validate_id_and_text()`.  
+Redis Keys: `cards:index`, `cards:updated_at`, `cards:stream`, `cards:stream:lastid`, `cards:last_flush_ts`.  
+Metrics counters: `metrics:saves`, `metrics:deletes` (integers).  
+Worker Position: `REDIS_STREAM_LAST`.  
+Health: lag classification vs `APP_WORKER_MIN_OK_LAG`, `APP_WORKER_MIN_DEGRADED_LAG`.
+
+## 16. Commit Discipline
+Single-responsibility patches. Update tests & `.env.example` + README for any new config or API shape. Keep this file concise—only add new lines if essential for small autonomous edits.
+
+End of AI guide.
