@@ -23,6 +23,8 @@ const historyBtn = document.getElementById('historyBtn');
 const drawer = document.getElementById('historyDrawer');
 const closeHistory = document.getElementById('closeHistory');
 const historyList = document.getElementById('historyList');
+let versionsPanel = null; // dynamic container
+let versionsState = { cardId:null, versions:[], selected:null };
 
 const flushBtn = document.getElementById('flushBtn');
 
@@ -331,6 +333,35 @@ historyBtn?.addEventListener('click', async ()=>{
   try{
     const {orphans=[]} = await API.history();
     historyList.innerHTML = '';
+    // Build tabs container if not present
+    if (!historyList.parentElement.querySelector('.history-tabs')) {
+      const tabs = document.createElement('div');
+      tabs.className='history-tabs';
+      tabs.innerHTML = `<button class="icon-btn tab active" data-tab="orphans">Deleted</button><button class="icon-btn tab" data-tab="versions">Versions</button>`;
+      historyList.parentElement.prepend(tabs);
+      tabs.querySelectorAll('.tab').forEach(t=> t.addEventListener('click', (e)=>{
+        tabs.querySelectorAll('.tab').forEach(b=>b.classList.remove('active')); e.currentTarget.classList.add('active');
+        const tab = e.currentTarget.getAttribute('data-tab');
+        if (tab==='orphans') { historyList.style.display='block'; versionsPanel.style.display='none'; }
+        else { historyList.style.display='none'; versionsPanel.style.display='block'; }
+      }));
+    }
+    if (!versionsPanel) {
+      versionsPanel = document.createElement('div');
+      versionsPanel.className='versions-panel';
+      versionsPanel.style.display='none';
+      versionsPanel.innerHTML = `<div class="versions-header"><select id="versionsCardSelect"></select><button class="icon-btn" id="snapshotBtn">Snapshot Now</button></div><div id="versionsList" class="versions-list muted">Select a card to load versions…</div><div id="versionDiff" class="version-diff"></div>`;
+      historyList.parentElement.appendChild(versionsPanel);
+      // Populate select with current in-memory cards
+      const select = versionsPanel.querySelector('#versionsCardSelect');
+      state.cards.sort((a,b)=>a.order-b.order).forEach(c=>{
+        const opt=document.createElement('option'); opt.value=c.id; opt.textContent=(c.name||'')||c.id.slice(0,8); select.appendChild(opt);
+      });
+      select.addEventListener('change', ()=> loadVersions(select.value));
+      versionsPanel.querySelector('#snapshotBtn').addEventListener('click', async()=>{
+        if(!select.value) return; await fetch('src/Api/index.php?action=version_snapshot',{method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id:select.value})}); loadVersions(select.value);
+      });
+    }
     if (!orphans.length) {
       historyList.textContent = 'No DB-only cards found.';
     } else {
@@ -357,9 +388,134 @@ historyBtn?.addEventListener('click', async ()=>{
       }));
     }
     drawer.classList.remove('hidden'); drawer.setAttribute('aria-hidden','false');
+    // Initialize versions select default to first card
+    if (versionsPanel) {
+      const sel = versionsPanel.querySelector('#versionsCardSelect');
+      if (sel && sel.options.length && !sel.value) { sel.value = sel.options[0].value; loadVersions(sel.value); }
+    }
   }catch{ alert('History load failed'); }
 });
 closeHistory?.addEventListener('click', ()=>{ drawer.classList.add('hidden'); drawer.setAttribute('aria-hidden','true'); });
+
+async function loadVersions(cardId){
+  if(!cardId) return; versionsState.cardId = cardId; const listEl = versionsPanel.querySelector('#versionsList'); listEl.textContent='Loading versions…';
+  try{
+    const res = await fetch(`src/Api/index.php?action=versions_list&id=${encodeURIComponent(cardId)}&limit=25`);
+    const j = await res.json(); if(!j.ok) throw new Error(j.error||'fail');
+    versionsState.versions = j.versions||[];
+    if(!versionsState.versions.length){ listEl.textContent='No versions captured yet.'; return; }
+    listEl.innerHTML='';
+    versionsState.versions.forEach(v=>{
+      const row=document.createElement('div'); row.className='version-row';
+      const when = new Date(v.captured_at*1000).toLocaleString();
+      row.innerHTML = `<div class="v-meta"><strong>#${v.version_id}</strong> <span>${when}</span> <span class="badge">${v.origin}</span> <span class="muted">${(v.size||0)} chars</span></div>`;
+      row.addEventListener('click', ()=> showVersionDiff(v.version_id));
+      listEl.appendChild(row);
+    });
+  }catch(e){ listEl.textContent='Load failed'; }
+}
+
+async function showVersionDiff(versionId){
+  const diffEl = versionsPanel.querySelector('#versionDiff'); diffEl.textContent='Loading…';
+  try{
+    const res = await fetch(`src/Api/index.php?action=version_get&version_id=${versionId}`);
+    const j = await res.json(); if(!j.ok) throw new Error(j.error||'fail');
+    const v = j.version; versionsState.selected = v;
+    const currentCard = state.cards.find(c=>c.id===versionsState.cardId);
+    const currentText = currentCard ? currentCard.text||'' : '';
+    // Build container with mode buttons Raw / Diff
+    diffEl.innerHTML = `
+      <div class="version-actions">
+        <div class="left-group">
+          <button class="icon-btn mode-btn active" data-mode="raw">Raw</button>
+          <button class="icon-btn mode-btn" data-mode="diff">Diff vs Current</button>
+        </div>
+        <div class="right-group">
+          <button class="icon-btn" data-act="restore" title="Restore this version as current">Restore</button>
+          <button class="icon-btn" data-act="copy" title="Copy version text to clipboard">Copy</button>
+        </div>
+      </div>
+      <div class="version-view" data-view="raw"><pre class="version-raw"><code>${escapeHtml(v.txt)}</code></pre></div>
+    `;
+    const renderDiff = () => {
+      const view = diffEl.querySelector('.version-view');
+      if (!view) return;
+      const diffLines = computeLineDiff(v.txt||'', currentText);
+      const html = diffLines.map(d=>{
+        const safe = escapeHtml(d.text);
+        if (d.type==='add') return `<div class="diff-line add">+ ${safe}</div>`;
+        if (d.type==='del') return `<div class="diff-line del">- ${safe}</div>`;
+        return `<div class="diff-line same">  ${safe}</div>`;
+      }).join('');
+      view.setAttribute('data-view','diff');
+      view.innerHTML = `<pre class="diff-block">${html}</pre>`;
+    };
+    // Mode switching
+    diffEl.querySelectorAll('.mode-btn').forEach(btn=> btn.addEventListener('click', e=>{
+      diffEl.querySelectorAll('.mode-btn').forEach(b=>b.classList.remove('active'));
+      e.currentTarget.classList.add('active');
+      const mode = e.currentTarget.getAttribute('data-mode');
+      const view = diffEl.querySelector('.version-view');
+      if (!view) return;
+      if (mode==='raw') {
+        view.setAttribute('data-view','raw');
+        view.innerHTML = `<pre class="version-raw"><code>${escapeHtml(v.txt)}</code></pre>`;
+      } else {
+        renderDiff();
+      }
+    }));
+    diffEl.querySelector('[data-act="restore"]').addEventListener('click', ()=> restoreVersion(v.version_id));
+    diffEl.querySelector('[data-act="copy"]').addEventListener('click', ()=> { navigator.clipboard.writeText(v.txt||''); alert('Copied'); });
+  }catch(e){ diffEl.textContent='Failed to load version'; }
+}
+
+async function restoreVersion(versionId){
+  if(!confirm('Restore this version?')) return; const res = await fetch('src/Api/index.php?action=version_restore',{method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({version_id:versionId})});
+  try{ const j = await res.json(); if(!j.ok) throw new Error(j.error||'fail'); alert('Restored'); window.dispatchEvent(new Event('renote:force-sync')); }catch{ alert('Restore failed'); }
+}
+
+function escapeHtml(s){ return (s||'').replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c])); }
+
+// ===== Simple line diff (LCS based) =====
+// Returns array of {type: 'same'|'add'|'del', text}
+function computeLineDiff(oldText, newText) {
+  if (oldText === newText) return oldText.split(/\r?\n/).map(t=>({type:'same', text:t}));
+  const a = oldText.split(/\r?\n/);
+  const b = newText.split(/\r?\n/);
+  const n = a.length, m = b.length;
+  // Guard for huge texts – fall back to simple comparison to avoid O(n*m) blowup
+  if (n*m > 160000) { // ~400x400 lines threshold
+    // Fallback: mark differing lines naively
+    const max = Math.max(n,m);
+    const out = [];
+    for (let i=0;i<max;i++) {
+      const av = a[i]; const bv = b[i];
+      if (av === bv) out.push({type:'same', text: av ?? ''});
+      else {
+        if (av !== undefined) out.push({type:'del', text: av});
+        if (bv !== undefined) out.push({type:'add', text: bv});
+      }
+    }
+    return out;
+  }
+  const dp = Array(n+1); for (let i=0;i<=n;i++){ dp[i]=Array(m+1).fill(0);} // LCS lengths
+  for (let i=n-1;i>=0;i--) {
+    for (let j=m-1;j>=0;j--) {
+      dp[i][j] = a[i] === b[j] ? 1 + dp[i+1][j+1] : Math.max(dp[i+1][j], dp[i][j+1]);
+    }
+  }
+  const out = [];
+  let i=0, j=0;
+  while (i<n && j<m) {
+    if (a[i] === b[j]) { out.push({type:'same', text:a[i]}); i++; j++; }
+    else if (dp[i+1][j] >= dp[i][j+1]) { out.push({type:'del', text:a[i++]}); }
+    else { out.push({type:'add', text:b[j++]}); }
+  }
+  while (i<n) out.push({type:'del', text:a[i++]});
+  while (j<m) out.push({type:'add', text:b[j++]});
+  // Collapse trivial noise: combine consecutive adds/dels separated by empty same lines (optional future)
+  return out;
+}
 
 // ===== Initial render =====
 render();

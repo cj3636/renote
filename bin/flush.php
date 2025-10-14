@@ -46,7 +46,15 @@ function worker_commit_batch(): void {
     $pdo->beginTransaction();
     $stmtUp=$pdo->prepare('INSERT INTO cards (id, name, txt, `order`, updated_at) VALUES (?,?,?,?,?) ON DUPLICATE KEY UPDATE name=VALUES(name), txt=VALUES(txt), `order`=VALUES(`order`), updated_at=VALUES(updated_at)');
     $stmtDel=$pdo->prepare('DELETE FROM cards WHERE id = ?');
-    foreach ($ids as $cid) { $h=$r->hgetall("card:$cid"); if(!$h){ $stmtDel->execute([$cid]); $stats['purges']++; continue; } $text=(string)($h['text']??''); $name=(string)($h['name']??''); $order=(int)($h['order']??0); $updated_at=(int)($h['updated_at']??time()); if(APP_PRUNE_EMPTY && mb_strlen(trim($text))<APP_EMPTY_MINLEN){ $stmtDel->execute([$cid]); $stats['skipped_empty']++; continue; } $stmtUp->execute([$cid,$name,$text,$order,$updated_at]); $stats['upserts']++; }
+    foreach ($ids as $cid) {
+        $h=$r->hgetall("card:$cid");
+        if(!$h){ $stmtDel->execute([$cid]); $stats['purges']++; continue; }
+        $text=(string)($h['text']??''); $name=(string)($h['name']??''); $order=(int)($h['order']??0); $updated_at=(int)($h['updated_at']??time());
+        if(APP_PRUNE_EMPTY && mb_strlen(trim($text))<APP_EMPTY_MINLEN){ $stmtDel->execute([$cid]); $stats['skipped_empty']++; continue; }
+        $stmtUp->execute([$cid,$name,$text,$order,$updated_at]); $stats['upserts']++;
+        // Version snapshot (flush origin) – ignore failures silently
+        try { version_insert($cid, $name, $text, $order, 'flush', false); } catch (Throwable $e) {}
+    }
     $pdo->commit(); $FLUSH_QUEUE=[];
 }
 

@@ -44,3 +44,4 @@ desktop.ini
 ssl/*
 !ssl/.gitkeep            # keep a placeholder
 
+ROADMAP.md

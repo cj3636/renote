@@ -245,3 +245,96 @@ function card_validate_id_and_text(string $id, string $text): void {
 if (!function_exists('card_repository')) {
   function card_repository() { return new \Renote\Domain\CardRepository(); }
 }
+
+// ================= Versioning / Backups (card_versions) =================
+
+if (!defined('APP_VERSION_MAX_PER_CARD')) define('APP_VERSION_MAX_PER_CARD', 25);
+if (!defined('APP_VERSION_MIN_INTERVAL_SEC')) define('APP_VERSION_MIN_INTERVAL_SEC', 60);
+if (!defined('APP_VERSION_MIN_SIZE_DELTA')) define('APP_VERSION_MIN_SIZE_DELTA', 20);
+if (!defined('APP_VERSION_RETENTION_DAYS')) define('APP_VERSION_RETENTION_DAYS', 0); // 0 = disabled
+
+/** Ensure version table exists (lazy) */
+function ensure_versions_table(): void {
+  static $done = false; if ($done) return; $pdo = db();
+  try { $pdo->query("SELECT 1 FROM card_versions LIMIT 1"); $done = true; return; } catch (Throwable $e) {}
+  $sql = "CREATE TABLE IF NOT EXISTS card_versions (\n    version_id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,\n    card_id VARCHAR(64) NOT NULL,\n    name VARCHAR(255) NULL,\n    txt MEDIUMTEXT NOT NULL,\n    `order` INT NOT NULL DEFAULT 0,\n    captured_at BIGINT NOT NULL,\n    origin ENUM('flush','manual','restore') NOT NULL DEFAULT 'flush',\n    KEY idx_card_time (card_id, captured_at DESC)\n  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
+  try { $pdo->exec($sql); } catch (Throwable $e) { error_log('Failed creating card_versions: '.$e->getMessage()); }
+  $done = true;
+}
+
+/** Fetch last version meta for card */
+function version_last(string $cardId): ?array {
+  ensure_versions_table();
+  $pdo = db();
+  $stmt = $pdo->prepare("SELECT version_id, captured_at, CHAR_LENGTH(txt) AS len, txt FROM card_versions WHERE card_id=? ORDER BY captured_at DESC LIMIT 1");
+  $stmt->execute([$cardId]);
+  $row = $stmt->fetch();
+  return $row ?: null;
+}
+
+/** Insert a version snapshot if policy allows */
+function version_insert(string $cardId, string $name, string $text, int $order, string $origin='flush', bool $force=false): bool {
+  ensure_versions_table();
+  $now = time();
+  $last = version_last($cardId);
+  $should = $force;
+  if (!$should && $last) {
+    $age = $now - (int)$last['captured_at'];
+    $delta = abs(strlen($text) - (int)$last['len']);
+    if ($age >= APP_VERSION_MIN_INTERVAL_SEC || $delta >= APP_VERSION_MIN_SIZE_DELTA) $should = true;
+  } elseif (!$last) { // always capture first
+    $should = true;
+  } else if (!$force) { $should = false; }
+  if (!$should) return false;
+  try {
+    $pdo = db();
+    $stmt = $pdo->prepare("INSERT INTO card_versions (card_id, name, txt, `order`, captured_at, origin) VALUES (?,?,?,?,?,?)");
+    $stmt->execute([$cardId,$name,$text,$order,$now,$origin]);
+    // Retention by count
+    $max = (int)APP_VERSION_MAX_PER_CARD; if ($max > 0) {
+      $pdo->prepare("DELETE FROM card_versions WHERE card_id=? AND version_id NOT IN (SELECT version_id FROM (SELECT version_id FROM card_versions WHERE card_id=? ORDER BY captured_at DESC LIMIT ?) t)")
+          ->execute([$cardId,$cardId,$max]);
+    }
+    // Retention by age
+    $days = (int)APP_VERSION_RETENTION_DAYS; if ($days > 0) {
+      $cut = $now - ($days*86400);
+      $pdo->prepare("DELETE FROM card_versions WHERE card_id=? AND captured_at < ?")->execute([$cardId,$cut]);
+    }
+    return true;
+  } catch (Throwable $e) { error_log('version_insert failed: '.$e->getMessage()); return false; }
+}
+
+function versions_list(string $cardId, int $limit=25): array {
+  ensure_versions_table();
+  $limit = max(1, min(200, $limit));
+  $stmt = db()->prepare("SELECT version_id, captured_at, name, `order`, CHAR_LENGTH(txt) AS size, origin FROM card_versions WHERE card_id=? ORDER BY captured_at DESC LIMIT $limit");
+  $stmt->execute([$cardId]);
+  return $stmt->fetchAll();
+}
+
+function version_get_full(int $versionId): ?array {
+  ensure_versions_table();
+  $stmt = db()->prepare("SELECT version_id, card_id, name, txt, `order`, captured_at, origin FROM card_versions WHERE version_id=?");
+  $stmt->execute([$versionId]);
+  $row = $stmt->fetch();
+  return $row ?: null;
+}
+
+function version_restore(int $versionId): bool {
+  $row = version_get_full($versionId); if (!$row) return false;
+  // Upsert into Redis & stream
+  redis_upsert_card($row['card_id'], $row['txt'], (int)$row['order'], (string)($row['name'] ?? ''));
+  // Record restore snapshot (forced)
+  version_insert($row['card_id'], (string)$row['name'], $row['txt'], (int)$row['order'], 'restore', true);
+  return true;
+}
+
+function version_snapshot_manual(string $cardId): bool {
+  $r = redis_client();
+  $data = $r->hgetall("card:$cardId");
+  if (!$data) return false;
+  $name = $data['name'] ?? '';
+  $text = $data['text'] ?? ($data['txt'] ?? '');
+  $order = (int)($data['order'] ?? 0);
+  return version_insert($cardId, $name, $text, $order, 'manual', true);
+}

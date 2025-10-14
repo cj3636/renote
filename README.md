@@ -26,6 +26,7 @@
 - API Overview
 - Background Worker
 - History / Soft Delete Semantics
+- Versioning & Backups
 - Security & Hardening
 - Operations & Health
 - Development Tooling (Linting / Tests)
@@ -46,6 +47,7 @@
 - Optional card name (title) + automatic blurb preview (first sentence)
 - Soft delete: removed from Redis but recoverable from MariaDB until flush purges
 - History drawer (UI) to restore or purge DB‑only cards
+- Per-card version snapshots (automatic on flush + manual) with retention & restore
 - Flush button (debug mode) now also triggers an immediate state re‑sync after write‑behind flush
 - Health indicator (lag classification: ok / degraded / backlog)
 - Adaptive stream flush batch sizing
@@ -64,13 +66,13 @@ cp .env.example .env
 # Edit .env with Redis/MariaDB credentials (never commit real secrets)
 ```
 
-2. Install dependencies
+1. Install dependencies
 
 ```bash
 composer install
 ```
 
-3. Create database + table (adjust database/user if changed):
+1. Create database + table (adjust database/user if changed):
 
 ```sql
 CREATE DATABASE IF NOT EXISTS pnotes CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
@@ -84,15 +86,15 @@ CREATE TABLE IF NOT EXISTS cards (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 ```
 
-4. Run a PHP dev server (or use Apache/Nginx):
+1. Run a PHP dev server (or use Apache/Nginx):
 
 ```bash
 php -S localhost:8080 index.php
 ```
 
-5. Open <http://localhost:8080> and start adding cards.
+1. Open <http://localhost:8080> and start adding cards.
 
-6. Manually flush (in debug mode) via the ⟳ button or CLI:
+2. Manually flush (in debug mode) via the ⟳ button or CLI:
 
 ```bash
 php flush.php --once
@@ -191,6 +193,10 @@ Flow:
 | `trim_stream` | GET | `keep` | Approximate trim (debug mode only) |
 | `health` | GET | – | Lag & status classification |
 | `metrics` | GET | – | Cumulative saves/deletes + stream stats |
+| `versions_list` | GET | `id, limit?` | List recent versions for a card |
+| `version_get` | GET | `version_id` | Retrieve a specific version (id + metadata + text) |
+| `version_restore` | POST | `{version_id}` | Restore version text into current card (new save event) |
+| `version_snapshot` | POST | `{id}` | Manual snapshot (bypasses interval/size heuristics) |
 
 All responses: `{ ok: boolean, ... }` or `{ ok:false, error: string }`.
 
@@ -222,6 +228,79 @@ All responses: `{ ok: boolean, ... }` or `{ ok:false, error: string }`.
 ---
 
 ## Security & Hardening
+
+## Versioning & Backups
+
+Renote implements lightweight, storage‑efficient version snapshots for each card. The goal: peace‑of‑mind recovery and diff inspection without a heavyweight VCS layer.
+
+### Capture Points
+
+1. Automatic on worker flush (write‑behind) for any card upserted whose content meaningfully changed since its last version snapshot.
+2. Manual via the History drawer "Snapshot Now" button (always creates a snapshot, ignoring heuristics).
+
+### Heuristics / Throttling
+
+To prevent unbounded growth and noisy near‑duplicate versions:
+
+- Minimum time interval between auto snapshots: `APP_VERSION_MIN_INTERVAL_SEC` (default 60s)
+- Minimum character delta (absolute difference in length) to qualify: `APP_VERSION_MIN_SIZE_DELTA` (default 20 chars)
+- Maximum stored versions per card: `APP_VERSION_MAX_PER_CARD` (default 25, newest kept)
+- Optional age pruning (if set): `APP_VERSION_RETENTION_DAYS` – versions older than this are purged during insertion
+
+These constants are defined in `Bootstrap.php` (migrate to env vars in a future iteration).
+
+### Schema
+
+Table `card_versions` (auto‑created lazily):
+
+```text
+card_id     VARCHAR(64)  NOT NULL
+version_id  BIGINT       NOT NULL AUTO_INCREMENT PRIMARY KEY
+txt         MEDIUMTEXT   NOT NULL
+size        INT          NOT NULL
+captured_at BIGINT       NOT NULL
+origin      VARCHAR(32)  NOT NULL  -- 'flush' | 'manual'
+INDEX (card_id, version_id DESC)
+```
+
+### API Usage
+
+Fetch list (newest first): `GET ?action=versions_list&id=<card_id>&limit=25`
+
+Get single version: `GET ?action=version_get&version_id=123`
+
+Restore version: `POST ?action=version_restore {"version_id":123}`
+
+Manual snapshot: `POST ?action=version_snapshot {"id":"<card_id>"}`
+
+### Client UI
+
+Open History → Versions tab:
+
+- Select card (dropdown auto-populated from in‑memory state)
+- View list of versions (timestamp, origin, size)
+- Click version → inspect Raw or Diff vs current (inline line diff; additions green, deletions red)
+- Restore or Copy from the action bar
+
+### Diff Algorithm
+
+Current implementation uses an in‑browser line‑based Longest Common Subsequence (LCS) algorithm with a safety cutoff (falls back to naive when line matrix would exceed ~160k cells to avoid freezing). Future enhancements may introduce word‑level granularity and performance optimizations (e.g., patience diff or Myers) for very large notes.
+
+### Future Improvements
+
+- Environment-driven configuration & documentation
+- Optional compression for large historical texts
+- UI filtering / search across versions
+- Bulk export of a card's timeline
+
+### Recovery Workflow Example
+
+1. Flush runs; version snapshot captured (origin: flush)
+2. User makes edits, then manually creates a snapshot (origin: manual)
+3. Later discovers regression → open Versions, pick earlier snapshot, inspect diff, click Restore
+4. Restored snapshot is written as the current card text (new save event), triggering a subsequent snapshot on next flush if heuristics satisfied
+
+---
 
 | Area | Recommendation |
 |------|----------------|

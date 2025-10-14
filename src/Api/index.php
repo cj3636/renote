@@ -157,6 +157,28 @@ switch ($action) {
       redis_upsert_card($row['id'], $row['txt'], (int)$row['order'], $row['name'] ?? '');
       ok(['restored'=>$id]);
       break;
+    // ----- Versioning / Backups -----
+    case 'versions_list':
+        $cardId = $_GET['id'] ?? null; $limit = isset($_GET['limit']) ? (int)$_GET['limit'] : 25;
+        if (!$cardId) fail('id required');
+        $list = versions_list($cardId, $limit);
+        ok(['versions'=>$list]);
+        break;
+    case 'version_get':
+        $vid = isset($_GET['version_id']) ? (int)$_GET['version_id'] : 0; if(!$vid) fail('version_id required');
+        $row = version_get_full($vid); if(!$row) fail('not found',404);
+        ok(['version'=>$row]);
+        break;
+    case 'version_restore':
+        $in = json_input(); $vid = (int)($in['version_id'] ?? 0); if(!$vid) fail('version_id required');
+        if (!version_restore($vid)) fail('restore_failed',500);
+        ok(['restored_version'=>$vid]);
+        break;
+    case 'version_snapshot':
+        $in = json_input(); $cardId = $in['id'] ?? null; if(!$cardId) fail('id required');
+        if (!version_snapshot_manual($cardId)) fail('snapshot_failed',500);
+        ok(['snapshotted'=>$cardId]);
+        break;
     default:
         fail('unknown action');
 }
