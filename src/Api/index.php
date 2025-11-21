@@ -27,6 +27,7 @@ switch ($action) {
         ok(['metrics'=>$m,'stream_length'=>$streamLen,'last_flushed_id'=>$lastId]);
         break;
     case 'save_card':
+        rl_check('save_card');
         $in = json_input();
         $id = $in['id'] ?? null;
         $text = $in['text'] ?? '';
@@ -38,6 +39,7 @@ switch ($action) {
         ok(['id' => $id, 'name'=>$name, 'text' => $text, 'order' => $order, 'updated_at' => $updated_at]);
         break;
     case 'bulk_save':
+        rl_check('bulk_save');
         $in = json_input();
         $cards = $in['cards'] ?? [];
         if (!is_array($cards)) fail('cards must be array');
@@ -53,6 +55,7 @@ switch ($action) {
         ok(['updated_at' => $lastUpdated]);
         break;
     case 'delete_card':
+        rl_check('delete_card');
         $in = json_input();
         $id = $in['id'] ?? null;
         if (!$id) fail('id required');
@@ -97,6 +100,7 @@ switch ($action) {
         ]);
         break;
     case 'flush_once':
+        rl_check('flush_once');
         if (!defined('APP_WRITE_BEHIND') || !APP_WRITE_BEHIND) fail('write-behind disabled', 400);
         if (!defined('REN0TE_WORKER_LIBRARY_MODE')) define('REN0TE_WORKER_LIBRARY_MODE', true);
         require_once __DIR__ . '/../../bin/flush.php';
@@ -127,6 +131,7 @@ switch ($action) {
         ok(['flushed'=>$processed, 'stats'=>$stats]);
         break;
     case 'trim_stream':
+        rl_check('trim_stream');
         if (!defined('APP_WRITE_BEHIND') || !APP_WRITE_BEHIND) fail('write-behind disabled', 400);
         $keep = isset($_GET['keep']) ? max(100, (int)$_GET['keep']) : 5000;
         $r = redis_client();
@@ -139,6 +144,7 @@ switch ($action) {
       break;
     case 'history_purge':
       if (!defined('APP_DEBUG') || !APP_DEBUG) fail('forbidden',403);
+      rl_check('history_purge');
       $in = json_input();
       $id = $in['id'] ?? null;
       if (!$id) fail('id required');
@@ -147,6 +153,7 @@ switch ($action) {
       break;
     case 'history_restore':
       if (!defined('APP_DEBUG') || !APP_DEBUG) fail('forbidden',403);
+      rl_check('history_restore');
       $in = json_input();
       $id = $in['id'] ?? null;
       if (!$id) fail('id required');
@@ -170,11 +177,13 @@ switch ($action) {
         ok(['version'=>$row]);
         break;
     case 'version_restore':
+        rl_check('version_restore');
         $in = json_input(); $vid = (int)($in['version_id'] ?? 0); if(!$vid) fail('version_id required');
         if (!version_restore($vid)) fail('restore_failed',500);
         ok(['restored_version'=>$vid]);
         break;
     case 'version_snapshot':
+        rl_check('version_snapshot');
         $in = json_input(); $cardId = $in['id'] ?? null; if(!$cardId) fail('id required');
         if (!version_snapshot_manual($cardId)) fail('snapshot_failed',500);
         ok(['snapshotted'=>$cardId]);

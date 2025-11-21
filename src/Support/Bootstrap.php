@@ -3,43 +3,32 @@
 require_once __DIR__ . '/../../vendor/autoload.php';
 require_once __DIR__ . '/../../config.php';
 
-function redis_client() {
+/**
+ * Shared Redis client (lazy singleton). Prefers UNIX sockets when configured.
+ */
+function redis_client()
+{
     static $redis = null;
     if ($redis === null) {
-        $params = [];
-        if (defined('REDIS_CONNECTION_TYPE') && REDIS_CONNECTION_TYPE === 'unix') {
-            $params = [
-                'scheme' => 'unix',
-                'path'   => REDIS_SOCKET,
-            ];
-        } else {
-            $params = [
-                'scheme' => 'tcp',
-                'host'   => REDIS_HOST,
-                'port'   => REDIS_PORT,
-            ];
+        $params = (defined('REDIS_CONNECTION_TYPE') && REDIS_CONNECTION_TYPE === 'unix')
+            ? ['scheme' => 'unix', 'path' => REDIS_SOCKET]
+            : ['scheme' => 'tcp', 'host' => REDIS_HOST, 'port' => REDIS_PORT];
+        if (defined('REDIS_USERNAME') && REDIS_USERNAME) {
+            $params['username'] = REDIS_USERNAME;
         }
-        if (defined('REDIS_USERNAME') && REDIS_USERNAME) $params['username'] = REDIS_USERNAME;
-        if (defined('REDIS_PASSWORD') && REDIS_PASSWORD) $params['password'] = REDIS_PASSWORD;
+        if (defined('REDIS_PASSWORD') && REDIS_PASSWORD) {
+            $params['password'] = REDIS_PASSWORD;
+        }
         $redis = new Predis\Client($params);
     }
     return $redis;
 }
 
-// Parse and cache JSON input body for POST/PUT requests.
-if (!function_exists('json_input')) {
-  function json_input(): array {
-    static $cache = null;
-    if ($cache !== null) return $cache;
-    $raw = file_get_contents('php://input');
-    if ($raw === false || $raw === '') { $cache = []; return $cache; }
-    $data = json_decode($raw, true);
-    if (!is_array($data)) { $cache = []; return $cache; }
-    $cache = $data; return $cache;
-  }
-}
-
-function db() {
+/**
+ * PDO connection (cached). Applies TLS options when provided for TCP connections.
+ */
+function db()
+{
     static $pdo = null;
     if ($pdo === null) {
         $options = PDO_COMMON;
@@ -49,8 +38,17 @@ function db() {
             $dsn = 'mysql:host=' . MYSQL_HOST . ';port=' . MYSQL_PORT . ';dbname=' . MYSQL_DB;
             if (defined('MYSQL_SSL_ENABLE') && MYSQL_SSL_ENABLE) {
                 $options[PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT] = defined('MYSQL_SSL_VERIFY_SERVER_CERT') ? MYSQL_SSL_VERIFY_SERVER_CERT : false;
-                if (defined('MYSQL_SSL_CA') && file_exists(MYSQL_SSL_CA)) {
+                if (defined('MYSQL_SSL_CA') && MYSQL_SSL_CA && file_exists(MYSQL_SSL_CA)) {
                     $options[PDO::MYSQL_ATTR_SSL_CA] = MYSQL_SSL_CA;
+                }
+                if (defined('PDO_MYSQL_SSL_CIPHER') && PDO_MYSQL_SSL_CIPHER) {
+                    $options[PDO::MYSQL_ATTR_SSL_CIPHER] = PDO_MYSQL_SSL_CIPHER;
+                }
+                if (defined('MYSQL_SSL_CRT') && MYSQL_SSL_CRT && file_exists(MYSQL_SSL_CRT)) {
+                    $options[PDO::MYSQL_ATTR_SSL_CERT] = MYSQL_SSL_CRT;
+                }
+                if (defined('MYSQL_SSL_KEY') && MYSQL_SSL_KEY && file_exists(MYSQL_SSL_KEY)) {
+                    $options[PDO::MYSQL_ATTR_SSL_KEY] = MYSQL_SSL_KEY;
                 }
             }
         }
@@ -59,7 +57,11 @@ function db() {
     return $pdo;
 }
 
-function load_state() {
+/**
+ * Current canonical state from Redis; hydrates Redis from DB if empty.
+ */
+function load_state(): array
+{
     $redis = redis_client();
     $cards = [];
     $cardIds = $redis->zrange(REDIS_INDEX_KEY, 0, -1);
@@ -115,7 +117,11 @@ function load_state() {
     return ['cards' => $cards, 'updated_at' => $updated_at];
 }
 
-function redis_upsert_card($id, $text, $order, $name='') {
+/**
+ * Persist card into Redis (and optionally enqueue stream for write-behind).
+ */
+function redis_upsert_card(string $id, string $text, int $order, string $name = ''): int
+{
   $redis = redis_client();
   $updated_at = time();
   $pipe = $redis->pipeline();
@@ -144,7 +150,8 @@ function redis_upsert_card($id, $text, $order, $name='') {
   return $updated_at;
 }
 
-function delete_card_everywhere($id) {
+function delete_card_everywhere(string $id): void
+{
     $redis = redis_client();
     $pipe = $redis->pipeline();
     $pipe->zrem(REDIS_INDEX_KEY, $id);
@@ -170,7 +177,8 @@ function delete_card_redis_only($id) {
   }
 }
 
-function metrics_snapshot(): array {
+function metrics_snapshot(): array
+{
   $r = redis_client();
   try {
     $vals = $r->mget(['metrics:saves','metrics:deletes']);
@@ -182,7 +190,8 @@ function metrics_snapshot(): array {
 }
 
 // Internal helper for direct DB upsert (used by worker or fallback)
-function _db_upsert_card($id, $name, $text, $order, $updated_at) {
+function _db_upsert_card(string $id, string $name, string $text, int $order, int $updated_at): void
+{
     try {
         $stmt = db()->prepare(
           "INSERT INTO cards (id, name, txt, `order`, updated_at)
@@ -200,19 +209,19 @@ function _db_upsert_card($id, $name, $text, $order, $updated_at) {
     } catch (PDOException $e) { error_log("DB upsert failed for $id: " . $e->getMessage()); }
 }
 
-function _db_delete_card($id) {
+function _db_delete_card(string $id): void
+{
   $stmt = db()->prepare("DELETE FROM cards WHERE id=?");
   $stmt->execute([$id]);
 }
 
-if (!defined('APP_PRUNE_EMPTY')) define('APP_PRUNE_EMPTY', true);
-if (!defined('APP_EMPTY_MINLEN')) define('APP_EMPTY_MINLEN', 1);
-
-function safe_json_for_script($value): string {
+function safe_json_for_script($value): string
+{
   return json_encode($value, JSON_UNESCAPED_SLASHES|JSON_HEX_TAG|JSON_HEX_AMP|JSON_HEX_APOS|JSON_HEX_QUOT);
 }
 
-function db_orphans(): array {
+function db_orphans(): array
+{
   $pdo = db();
   $r = redis_client();
   $redisIds = $r->zrange(REDIS_INDEX_KEY, 0, -1) ?: [];
@@ -226,7 +235,8 @@ function db_orphans(): array {
   return $stmt->fetchAll();
 }
 
-function card_validate_id_and_text(string $id, string $text): void {
+function card_validate_id_and_text(string $id, string $text): void
+{
   if (defined('APP_REQUIRE_UUID') && APP_REQUIRE_UUID) {
     if (!preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i', $id)) {
       throw new InvalidArgumentException('invalid_id_format');
@@ -248,13 +258,9 @@ if (!function_exists('card_repository')) {
 
 // ================= Versioning / Backups (card_versions) =================
 
-if (!defined('APP_VERSION_MAX_PER_CARD')) define('APP_VERSION_MAX_PER_CARD', 25);
-if (!defined('APP_VERSION_MIN_INTERVAL_SEC')) define('APP_VERSION_MIN_INTERVAL_SEC', 60);
-if (!defined('APP_VERSION_MIN_SIZE_DELTA')) define('APP_VERSION_MIN_SIZE_DELTA', 20);
-if (!defined('APP_VERSION_RETENTION_DAYS')) define('APP_VERSION_RETENTION_DAYS', 0); // 0 = disabled
-
 /** Ensure version table exists (lazy) */
-function ensure_versions_table(): void {
+function ensure_versions_table(): void
+{
   static $done = false; if ($done) return; $pdo = db();
   try { $pdo->query("SELECT 1 FROM card_versions LIMIT 1"); $done = true; return; } catch (Throwable $e) {}
   $sql = "CREATE TABLE IF NOT EXISTS card_versions (\n    version_id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,\n    card_id VARCHAR(64) NOT NULL,\n    name VARCHAR(255) NULL,\n    txt MEDIUMTEXT NOT NULL,\n    `order` INT NOT NULL DEFAULT 0,\n    captured_at BIGINT NOT NULL,\n    origin ENUM('flush','manual','restore') NOT NULL DEFAULT 'flush',\n    KEY idx_card_time (card_id, captured_at DESC)\n  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
@@ -263,7 +269,8 @@ function ensure_versions_table(): void {
 }
 
 /** Fetch last version meta for card */
-function version_last(string $cardId): ?array {
+function version_last(string $cardId): ?array
+{
   ensure_versions_table();
   $pdo = db();
   $stmt = $pdo->prepare("SELECT version_id, captured_at, CHAR_LENGTH(txt) AS len, txt FROM card_versions WHERE card_id=? ORDER BY captured_at DESC LIMIT 1");
@@ -273,7 +280,8 @@ function version_last(string $cardId): ?array {
 }
 
 /** Insert a version snapshot if policy allows */
-function version_insert(string $cardId, string $name, string $text, int $order, string $origin='flush', bool $force=false): bool {
+function version_insert(string $cardId, string $name, string $text, int $order, string $origin = 'flush', bool $force = false): bool
+{
   ensure_versions_table();
   $now = time();
   $last = version_last($cardId);
@@ -304,7 +312,8 @@ function version_insert(string $cardId, string $name, string $text, int $order, 
   } catch (Throwable $e) { error_log('version_insert failed: '.$e->getMessage()); return false; }
 }
 
-function versions_list(string $cardId, int $limit=25): array {
+function versions_list(string $cardId, int $limit = 25): array
+{
   ensure_versions_table();
   $limit = max(1, min(200, $limit));
   $stmt = db()->prepare("SELECT version_id, captured_at, name, `order`, CHAR_LENGTH(txt) AS size, origin FROM card_versions WHERE card_id=? ORDER BY captured_at DESC LIMIT $limit");
@@ -312,7 +321,8 @@ function versions_list(string $cardId, int $limit=25): array {
   return $stmt->fetchAll();
 }
 
-function version_get_full(int $versionId): ?array {
+function version_get_full(int $versionId): ?array
+{
   ensure_versions_table();
   $stmt = db()->prepare("SELECT version_id, card_id, name, txt, `order`, captured_at, origin FROM card_versions WHERE version_id=?");
   $stmt->execute([$versionId]);
@@ -320,7 +330,8 @@ function version_get_full(int $versionId): ?array {
   return $row ?: null;
 }
 
-function version_restore(int $versionId): bool {
+function version_restore(int $versionId): bool
+{
   $row = version_get_full($versionId); if (!$row) return false;
   // Upsert into Redis & stream
   redis_upsert_card($row['card_id'], $row['txt'], (int)$row['order'], (string)($row['name'] ?? ''));
@@ -329,7 +340,8 @@ function version_restore(int $versionId): bool {
   return true;
 }
 
-function version_snapshot_manual(string $cardId): bool {
+function version_snapshot_manual(string $cardId): bool
+{
   $r = redis_client();
   $data = $r->hgetall("card:$cardId");
   if (!$data) return false;

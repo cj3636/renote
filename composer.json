@@ -34,7 +34,7 @@
   "scripts": {
     "test": "phpunit --colors=always",
     "analyse": "phpstan analyse --memory-limit=512M",
-    "lint": "php -l index.php api.php bootstrap.php flush.php || true",
+    "lint": "php -l index.php src/Api/index.php src/Support/Bootstrap.php bin/flush.php",
     "format": "php-cs-fixer fix --using-cache=no --verbose",
     "cs": "phpcs --standard=PSR12 -q --colors ."
   }

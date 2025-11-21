@@ -60,8 +60,6 @@ function worker_commit_batch(): void {
 
 function worker_commit_pending(): void { worker_commit_batch(); }
 
-if (!defined('APP_PRUNE_EMPTY')) define('APP_PRUNE_EMPTY', true); if (!defined('APP_EMPTY_MINLEN')) define('APP_EMPTY_MINLEN', 1);
-
 // Only run the worker loop if not in library mode
 if (!defined('REN0TE_WORKER_LIBRARY_MODE')) {
     logln("Starting flush worker from ID $lastId (once=" . ($once?'yes':'no') . ")");

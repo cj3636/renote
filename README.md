@@ -97,7 +97,7 @@ php -S localhost:8080 index.php
 2. Manually flush (in debug mode) via the ⟳ button or CLI:
 
 ```bash
-php flush.php --once
+php bin/flush.php --once   # or php flush.php --once (compat wrapper)
 ```
 
 > For development you may set `APP_DEBUG=true` in `.env` to reveal debug & history controls.
@@ -106,7 +106,7 @@ php flush.php --once
 
 ## Production Deployment
 
-Recommend Nginx → PHP‑FPM. Place project in `/var/www/renote` (or similar). Use systemd timer to run `flush.php --once` every few minutes (batch mode) or run continuously in continuous mode.
+Recommend Nginx + PHP-FPM. Place project in `/var/www/renote` (or similar). Use a systemd timer to run `bin/flush.php --once` every few minutes (batch mode) or run continuously in continuous mode.
 
 Example Nginx server block (minimal):
 
@@ -143,17 +143,17 @@ Adjust interval in `renote.timer` to match `APP_BATCH_FLUSH_EXPECTED_INTERVAL` (
 
 ## Configuration
 
-All runtime settings now come from environment variables (`.env` in development). `config.php` loads and maps them to legacy constants so existing code continues to function. See `.env.example` for the full list and descriptions.
+`config.php` reads `.env` (via phpdotenv when available) and maps values to legacy constants. Prefer `.env` for deployment secrets, but either file stays in sync. `.env.example` documents every setting with defaults and warnings.
 
-Key environment variables:
+Highlights (tune only if needed):
 
-- Redis: `REDIS_CONNECTION`, `REDIS_SOCKET`, `REDIS_HOST`, `REDIS_PORT`, `REDIS_USERNAME`, `REDIS_PASSWORD`
-- MariaDB: `DB_USE_SOCKET`, `DB_SOCKET`, `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASS`, `DB_SSL_ENABLE`, `DB_SSL_VERIFY`, `DB_SSL_CA`, `DB_SSL_CRT`, `DB_SSL_KEY`
-- Worker: `APP_WRITE_BEHIND`, `APP_WRITE_BEHIND_MODE`, `APP_STREAM_MAXLEN`, `WORKER_MAX_BATCH`, `WORKER_TRIM_EVERY`, `WORKER_BLOCK_MS`
-- Health thresholds: `WORKER_MIN_OK_LAG`, `WORKER_MIN_DEGRADED_LAG`, `BATCH_FLUSH_EXPECTED_INTERVAL`
-- Pruning / limits: `PRUNE_EMPTY`, `EMPTY_MINLEN`, `APP_CARD_MAX_LEN`
-- Rate limiting & validation: `RATE_LIMIT_WINDOW`, `RATE_LIMIT_MAX`, `APP_REQUIRE_UUID`
-- Debug UI: `APP_DEBUG`
+- Redis: `REDIS_CONNECTION` (unix|tcp), socket/host/port, optional username/password
+- MariaDB: `DB_USE_SOCKET` (favor sockets for latency), TCP credentials, TLS knobs (`DB_SSL_*`); verify certificates on untrusted networks
+- Worker & health: `APP_WRITE_BEHIND`, `APP_WRITE_BEHIND_MODE`, `APP_STREAM_MAXLEN` (lowering too far risks dropping backlog), `WORKER_*`, `BATCH_FLUSH_EXPECTED_INTERVAL`
+- Validation / pruning: `APP_CARD_MAX_LEN`, `APP_REQUIRE_UUID`, `PRUNE_EMPTY` + `EMPTY_MINLEN` (when true, near-empty cards are purged during flush)
+- Rate limiting: `RATE_LIMIT_MAX` per `RATE_LIMIT_WINDOW` (set max=0 to disable; soft-fails if Redis is unavailable)
+- Version history: `APP_VERSION_MAX_PER_CARD`, `APP_VERSION_MIN_INTERVAL_SEC`, `APP_VERSION_MIN_SIZE_DELTA`, `APP_VERSION_RETENTION_DAYS`
+- Debug UI: `APP_DEBUG` (exposes flush/history endpoints)
 
 Systemd: copy `.env` to `/etc/renote.env` (or similar) and the provided `renote.service` will load it via `EnvironmentFile=-/etc/renote.env`.
 
@@ -208,7 +208,7 @@ All responses: `{ ok: boolean, ... }` or `{ ok:false, error: string }`.
 
 ---
 
-## Background Worker (`flush.php`)
+## Background Worker (`bin/flush.php`)
 
 - Reads stream with `XRANGE` batches (adaptive) in batch or continuous mode
 - Coalesces events per card id before a DB transaction
@@ -245,9 +245,8 @@ To prevent unbounded growth and noisy near‑duplicate versions:
 - Minimum time interval between auto snapshots: `APP_VERSION_MIN_INTERVAL_SEC` (default 60s)
 - Minimum character delta (absolute difference in length) to qualify: `APP_VERSION_MIN_SIZE_DELTA` (default 20 chars)
 - Maximum stored versions per card: `APP_VERSION_MAX_PER_CARD` (default 25, newest kept)
-- Optional age pruning (if set): `APP_VERSION_RETENTION_DAYS` – versions older than this are purged during insertion
-
-These constants are defined in `Bootstrap.php` (migrate to env vars in a future iteration).
+- Optional age pruning (if set): `APP_VERSION_RETENTION_DAYS` - versions older than this are purged during insertion
+(configurable via environment; see `.env.example`)
 
 ### Schema
 
@@ -410,10 +409,10 @@ PRs welcome. Please run linting & tests before submitting. For larger changes op
 
 ```bash
 # Run worker once (batch mode)
-php flush.php --once --quiet
+php bin/flush.php --once --quiet
 
 # Run worker continuously (experimental)
-php flush.php --quiet --loop   # (would need enhancement to support --loop flag)
+php bin/flush.php --quiet
 
 # Static analysis
 vendor/bin/phpstan analyse
@@ -422,4 +421,4 @@ vendor/bin/phpstan analyse
 composer test
 ```
 
-> Thank you for using / contributing to Renote! 🎉
+> Thank you for using / contributing to Renote!

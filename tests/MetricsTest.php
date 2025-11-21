@@ -5,12 +5,14 @@ final class MetricsTest extends TestCase
 {
     protected function setUp(): void
     {
-        require_once __DIR__ . '/src/Support/Bootstrap.php';
+        require_once __DIR__ . '/../src/Support/Bootstrap.php';
         if (!function_exists('metrics_snapshot')) {
             $this->markTestSkipped('metrics_snapshot not available');
         }
         // Skip if Redis unreachable
-        try { redis_client()->ping(); } catch (Throwable $e) { $this->markTestSkipped('Redis unavailable'); }
+        if (!function_exists('renote_test_can_connect_redis') || !renote_test_can_connect_redis()) {
+            $this->markTestSkipped('Redis unavailable');
+        }
     }
 
     public function testMetricsIncrement(): void
