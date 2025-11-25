@@ -12,9 +12,9 @@ User=www-data
 Group=www-data
 SupplementaryGroups=redis
 WorkingDirectory=/var/www/renote
+EnvironmentFile=/var/www/renote/.env
 ExecStart=/usr/bin/php /var/www/renote/bin/flush.php --once --quiet
 # Load environment variables (create /etc/renote.env from .env.example)
-EnvironmentFile=-/etc/renote.env
 TimeoutStartSec=20
 
 # Hardening
@@ -30,7 +30,7 @@ RestrictNamespaces=true
 CapabilityBoundingSet=
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 SystemCallFilter=@system-service
-UMask=0077                   # prevent accidental world-readable files
+UMask=077                   # prevent accidental world-readable files
 
 StandardOutput=journal
 StandardError=journal
