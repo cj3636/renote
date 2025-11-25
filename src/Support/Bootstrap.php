@@ -4,6 +4,22 @@ require_once __DIR__ . '/../../vendor/autoload.php';
 require_once __DIR__ . '/../../config.php';
 
 /**
+ * Normalize category id (null/empty -> root).
+ */
+function normalize_category_id(?string $categoryId): string
+{
+    $categoryId = trim((string)$categoryId);
+    return $categoryId === '' ? 'root' : $categoryId;
+}
+
+function category_index_key(string $categoryId): string
+{
+    return normalize_category_id($categoryId) === 'root'
+        ? REDIS_INDEX_KEY
+        : 'cat:' . normalize_category_id($categoryId) . ':cards';
+}
+
+/**
  * Shared Redis client (lazy singleton). Prefers UNIX sockets when configured.
  */
 function redis_client()
@@ -22,6 +38,39 @@ function redis_client()
         $redis = new Predis\Client($params);
     }
     return $redis;
+}
+
+/**
+ * Whether the cards table has the category_id column (cached).
+ */
+function db_supports_categories(): bool
+{
+    static $has = null;
+    if ($has !== null) return $has;
+    try {
+        $stmt = db()->query("SHOW COLUMNS FROM cards LIKE 'category_id'");
+        $has = (bool)$stmt->fetch();
+    } catch (Throwable $e) {
+        $has = false;
+    }
+    return $has;
+}
+
+/**
+ * Ensure categories table exists (no-op if already present).
+ */
+function ensure_categories_table(): void
+{
+    static $done = false; if ($done) return; $pdo = db();
+    try { $pdo->query("SELECT 1 FROM categories LIMIT 1"); $done = true; return; } catch (Throwable $e) {}
+    $sql = "CREATE TABLE IF NOT EXISTS categories (
+        id VARCHAR(64) PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        `order` INT NOT NULL DEFAULT 0,
+        updated_at BIGINT NOT NULL
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
+    try { $pdo->exec($sql); } catch (Throwable $e) { error_log('Failed creating categories table: '.$e->getMessage()); }
+    $done = true;
 }
 
 /**
@@ -59,70 +108,139 @@ function db()
 
 /**
  * Current canonical state from Redis; hydrates Redis from DB if empty.
+ * Returns categories (excluding implicit root) and cards (with category_id).
  */
 function load_state(): array
 {
     $redis = redis_client();
     $cards = [];
-    $cardIds = $redis->zrange(REDIS_INDEX_KEY, 0, -1);
+    $categories = [];
 
-    if (empty($cardIds)) {
-        // Hydrate from DB if Redis is empty (include name column)
-        $stmt = db()->query("SELECT id, name, txt, `order`, updated_at FROM cards ORDER BY `order` ASC");
+    // ---- Categories ----
+    $categoryIds = $redis->zrange(REDIS_CATEGORIES_INDEX, 0, -1) ?: [];
+    if ($categoryIds) {
+        $pipe = $redis->pipeline();
+        foreach ($categoryIds as $cid) { $pipe->hgetall(REDIS_CATEGORY_PREFIX . $cid); }
+        $catData = $pipe->execute();
+        foreach ($catData as $idx => $data) {
+            if (!$data) continue;
+            $categories[] = [
+                'id' => $categoryIds[$idx],
+                'name' => $data['name'] ?? '',
+                'order' => (int)($data['order'] ?? 0),
+                'updated_at' => (int)($data['updated_at'] ?? 0),
+            ];
+        }
+    } else {
+        // Hydrate categories from DB if present
+        try {
+            ensure_categories_table();
+            $rows = db()->query("SELECT id, name, `order`, updated_at FROM categories ORDER BY `order` ASC")->fetchAll();
+            if ($rows) {
+                $pipe = $redis->pipeline();
+                foreach ($rows as $row) {
+                    $categories[] = [
+                        'id' => $row['id'],
+                        'name' => $row['name'],
+                        'order' => (int)$row['order'],
+                        'updated_at' => (int)$row['updated_at'],
+                    ];
+                    $pipe->hmset(REDIS_CATEGORY_PREFIX . $row['id'], [
+                        'name' => $row['name'],
+                        'order' => $row['order'],
+                        'updated_at' => $row['updated_at'],
+                    ]);
+                    $pipe->zadd(REDIS_CATEGORIES_INDEX, [$row['id'] => $row['order']]);
+                }
+                $pipe->execute();
+                $categoryIds = array_column($rows, 'id');
+            }
+        } catch (Throwable $e) {
+            // ignore
+        }
+    }
+
+    // ---- Cards ----
+    $cardIdsByCategory = [];
+    $cardIdsByCategory['root'] = $redis->zrange(REDIS_INDEX_KEY, 0, -1) ?: [];
+    foreach ($categoryIds as $cid) {
+        $cardIdsByCategory[$cid] = $redis->zrange(category_index_key($cid), 0, -1) ?: [];
+    }
+    $allIds = [];
+    foreach ($cardIdsByCategory as $ids) { $allIds = array_merge($allIds, $ids); }
+
+    if (empty($allIds)) {
+        // Hydrate from DB if Redis is empty (include category if available)
+        $selectCols = db_supports_categories()
+            ? "id, name, category_id, txt, `order`, updated_at"
+            : "id, name, txt, `order`, updated_at";
+        $stmt = db()->query("SELECT $selectCols FROM cards ORDER BY `order` ASC");
         $dbCards = $stmt->fetchAll();
         if (empty($dbCards)) {
-             return ['cards' => [], 'updated_at' => 0];
+            return ['cards' => [], 'categories' => $categories, 'updated_at' => 0];
         }
         $pipe = $redis->pipeline();
         foreach ($dbCards as $card) {
+            $cat = db_supports_categories() ? normalize_category_id($card['category_id'] ?? 'root') : 'root';
             $pipe->hmset("card:{$card['id']}", [
               'name' => $card['name'] ?? '',
               'text' => $card['txt'],
               'txt'  => $card['txt'],
               'order' => $card['order'],
-              'updated_at' => $card['updated_at']
+              'updated_at' => $card['updated_at'],
+              'category_id' => $cat,
             ]);
-            $pipe->zadd(REDIS_INDEX_KEY, [$card['id'] => $card['order']]);
+            $pipe->zadd(category_index_key($cat), [$card['id'] => $card['order']]);
             $cards[] = [
                 'id' => $card['id'],
                 'name' => $card['name'] ?? '',
                 'text' => $card['txt'],
                 'order' => (int)$card['order'],
-                'updated_at' => (int)$card['updated_at']
+                'updated_at' => (int)$card['updated_at'],
+                'category_id' => $cat,
             ];
         }
         $pipe->execute();
         $updated_at = max(array_column($dbCards, 'updated_at'));
         $redis->set(REDIS_UPDATED_AT, $updated_at);
-        return ['cards' => $cards, 'updated_at' => $updated_at];
+        usort($categories, function($a,$b){ return ($a['order'] ?? 0) <=> ($b['order'] ?? 0); });
+        return ['cards' => $cards, 'categories' => $categories, 'updated_at' => $updated_at];
     }
 
     $pipe = $redis->pipeline();
-    foreach ($cardIds as $id) { $pipe->hgetall("card:$id"); }
+    foreach ($allIds as $id) { $pipe->hgetall("card:$id"); }
     $cardDataList = $pipe->execute();
-
-    foreach ($cardDataList as $index => $cardData) {
-        if ($cardData) {
-            $textVal = $cardData['text'] ?? ($cardData['txt'] ?? '');
-            $cards[] = [
-                'id' => $cardIds[$index],
-                'name' => $cardData['name'] ?? '',
-                'text' => $textVal,
-                'order' => (int)($cardData['order'] ?? 0),
-                'updated_at' => (int)($cardData['updated_at'] ?? 0),
-            ];
+    $idx = 0;
+    foreach ($cardIdsByCategory as $categoryId => $ids) {
+        foreach ($ids as $id) {
+            $cardData = $cardDataList[$idx++] ?? [];
+            if ($cardData) {
+                $textVal = $cardData['text'] ?? ($cardData['txt'] ?? '');
+                $cards[] = [
+                    'id' => $id,
+                    'name' => $cardData['name'] ?? '',
+                    'text' => $textVal,
+                    'order' => (int)($cardData['order'] ?? 0),
+                    'updated_at' => (int)($cardData['updated_at'] ?? 0),
+                    'category_id' => normalize_category_id($cardData['category_id'] ?? $categoryId),
+                ];
+            }
         }
     }
+    usort($categories, function($a,$b){ return ($a['order'] ?? 0) <=> ($b['order'] ?? 0); });
     $updated_at = (int)$redis->get(REDIS_UPDATED_AT);
-    return ['cards' => $cards, 'updated_at' => $updated_at];
+    return ['cards' => $cards, 'categories' => $categories, 'updated_at' => $updated_at];
 }
 
 /**
  * Persist card into Redis (and optionally enqueue stream for write-behind).
  */
-function redis_upsert_card(string $id, string $text, int $order, string $name = ''): int
+function redis_upsert_card(string $id, string $text, int $order, string $name = '', ?string $categoryId = 'root'): int
 {
   $redis = redis_client();
+  $categoryId = normalize_category_id($categoryId);
+  $existing = $redis->hgetall("card:$id");
+  $prevCategory = normalize_category_id($existing['category_id'] ?? $categoryId);
   $updated_at = time();
   $pipe = $redis->pipeline();
   $pipe->hmset("card:$id", [
@@ -130,9 +248,13 @@ function redis_upsert_card(string $id, string $text, int $order, string $name = 
     'text' => $text,
     'txt'  => $text,
     'order' => $order,
-    'updated_at' => $updated_at
+    'updated_at' => $updated_at,
+    'category_id' => $categoryId,
   ]);
-  $pipe->zadd(REDIS_INDEX_KEY, [$id => $order]);
+  $pipe->zadd(category_index_key($categoryId), [$id => $order]);
+  if ($prevCategory !== $categoryId) {
+    $pipe->zrem(category_index_key($prevCategory), $id);
+  }
   $pipe->set(REDIS_UPDATED_AT, $updated_at);
   $pipe->incr('metrics:saves');
   $pipe->execute();
@@ -141,20 +263,94 @@ function redis_upsert_card(string $id, string $text, int $order, string $name = 
     try {
       $redis->executeRaw(['XADD', REDIS_STREAM, '*',
         'id', $id, 'name', (string)$name, 'text', $text,
-        'order', (string)$order, 'updated_at', (string)$updated_at
+        'order', (string)$order, 'category_id', $categoryId, 'updated_at', (string)$updated_at
       ]);
-    } catch (Throwable $e) { _db_upsert_card($id, $name, $text, $order, $updated_at); }
+    } catch (Throwable $e) { _db_upsert_card($id, $name, $text, $order, $updated_at, $categoryId); }
   } else {
-    _db_upsert_card($id, $name, $text, $order, $updated_at);
+    _db_upsert_card($id, $name, $text, $order, $updated_at, $categoryId);
   }
   return $updated_at;
+}
+
+/**
+ * Create or update a category (synchronous DB write).
+ */
+function redis_upsert_category(string $id, string $name, int $order): int
+{
+  $id = normalize_category_id($id);
+  if ($id === 'root') return time(); // root is implicit
+  $r = redis_client();
+  $updated_at = time();
+  $pipe = $r->pipeline();
+  $pipe->hmset(REDIS_CATEGORY_PREFIX . $id, [
+    'name' => $name,
+    'order' => $order,
+    'updated_at' => $updated_at,
+  ]);
+  $pipe->zadd(REDIS_CATEGORIES_INDEX, [$id => $order]);
+  $pipe->set(REDIS_UPDATED_AT, $updated_at);
+  $pipe->execute();
+
+  try {
+    ensure_categories_table();
+    $stmt = db()->prepare(
+      "INSERT INTO categories (id, name, `order`, updated_at)
+       VALUES (:id,:name,:order,:updated_at)
+       ON DUPLICATE KEY UPDATE name=VALUES(name), `order`=VALUES(`order`), updated_at=VALUES(updated_at)"
+    );
+    $stmt->execute([
+      ':id' => $id,
+      ':name' => $name,
+      ':order' => $order,
+      ':updated_at' => $updated_at,
+    ]);
+  } catch (Throwable $e) { error_log('DB upsert category failed: '.$e->getMessage()); }
+
+  return $updated_at;
+}
+
+function category_card_count(string $categoryId): int
+{
+  $categoryId = normalize_category_id($categoryId);
+  $r = redis_client();
+  try { return (int)$r->zcard(category_index_key($categoryId)); } catch (Throwable $e) {}
+  if (db_supports_categories()) {
+    try {
+      $stmt = db()->prepare("SELECT COUNT(*) AS c FROM cards WHERE category_id = ?");
+      $stmt->execute([$categoryId]);
+      $row = $stmt->fetch();
+      return (int)($row['c'] ?? 0);
+    } catch (Throwable $e) {}
+  }
+  return 0;
+}
+
+function delete_category(string $categoryId): bool
+{
+  $categoryId = normalize_category_id($categoryId);
+  if ($categoryId === 'root') return false;
+  if (category_card_count($categoryId) > 0) return false;
+  $r = redis_client();
+  $pipe = $r->pipeline();
+  $pipe->zrem(REDIS_CATEGORIES_INDEX, $categoryId);
+  $pipe->del(REDIS_CATEGORY_PREFIX . $categoryId);
+  $pipe->del(category_index_key($categoryId));
+  $pipe->execute();
+  try {
+    ensure_categories_table();
+    $stmt = db()->prepare("DELETE FROM categories WHERE id = ?");
+    $stmt->execute([$categoryId]);
+  } catch (Throwable $e) { error_log('DB delete category failed: '.$e->getMessage()); }
+  return true;
 }
 
 function delete_card_everywhere(string $id): void
 {
     $redis = redis_client();
+    $catId = 'root';
+    try { $data = $redis->hgetall("card:$id"); if ($data && isset($data['category_id'])) $catId = normalize_category_id($data['category_id']); } catch (Throwable $e) {}
     $pipe = $redis->pipeline();
-    $pipe->zrem(REDIS_INDEX_KEY, $id);
+    $pipe->zrem(category_index_key($catId), $id);
     $pipe->del("card:$id");
     $pipe->execute();
     try {
@@ -167,13 +363,15 @@ function delete_card_everywhere(string $id): void
 
 function delete_card_redis_only($id) {
   $r = redis_client();
+  $catId = 'root';
+  try { $data = $r->hgetall("card:$id"); if ($data && isset($data['category_id'])) $catId = normalize_category_id($data['category_id']); } catch (Throwable $e) {}
   $pipe = $r->pipeline();
-  $pipe->zrem(REDIS_INDEX_KEY, $id);
+  $pipe->zrem(category_index_key($catId), $id);
   $pipe->del("card:$id");
   $pipe->incr('metrics:deletes');
   $pipe->execute();
   if (defined('APP_WRITE_BEHIND') && APP_WRITE_BEHIND) {
-    try { $r->executeRaw(['XADD', REDIS_STREAM, '*', 'id', $id, 'op', 'del', 'ts', (string)time()]); } catch (Throwable $e) {}
+    try { $r->executeRaw(['XADD', REDIS_STREAM, '*', 'id', $id, 'op', 'del', 'ts', (string)time(), 'category_id', $catId]); } catch (Throwable $e) {}
   }
 }
 
@@ -190,22 +388,40 @@ function metrics_snapshot(): array
 }
 
 // Internal helper for direct DB upsert (used by worker or fallback)
-function _db_upsert_card(string $id, string $name, string $text, int $order, int $updated_at): void
+function _db_upsert_card(string $id, string $name, string $text, int $order, int $updated_at, string $categoryId = 'root'): void
 {
     try {
-        $stmt = db()->prepare(
-          "INSERT INTO cards (id, name, txt, `order`, updated_at)
-           VALUES (:id,:name,:txt,:order,:updated_at)
-           ON DUPLICATE KEY UPDATE
-             name=VALUES(name), txt=VALUES(txt), `order`=VALUES(`order`), updated_at=VALUES(updated_at)"
-        );
-        $stmt->execute([
-            ':id' => $id,
-            ':name'=> $name,
-            ':txt' => $text,
-            ':order' => $order,
-            ':updated_at' => $updated_at
-        ]);
+        $hasCategory = db_supports_categories();
+        if ($hasCategory) {
+            $stmt = db()->prepare(
+              "INSERT INTO cards (id, name, category_id, txt, `order`, updated_at)
+               VALUES (:id,:name,:category_id,:txt,:order,:updated_at)
+               ON DUPLICATE KEY UPDATE
+                 name=VALUES(name), category_id=VALUES(category_id), txt=VALUES(txt), `order`=VALUES(`order`), updated_at=VALUES(updated_at)"
+            );
+            $stmt->execute([
+                ':id' => $id,
+                ':name'=> $name,
+                ':category_id' => normalize_category_id($categoryId),
+                ':txt' => $text,
+                ':order' => $order,
+                ':updated_at' => $updated_at
+            ]);
+        } else {
+            $stmt = db()->prepare(
+              "INSERT INTO cards (id, name, txt, `order`, updated_at)
+               VALUES (:id,:name,:txt,:order,:updated_at)
+               ON DUPLICATE KEY UPDATE
+                 name=VALUES(name), txt=VALUES(txt), `order`=VALUES(`order`), updated_at=VALUES(updated_at)"
+            );
+            $stmt->execute([
+                ':id' => $id,
+                ':name'=> $name,
+                ':txt' => $text,
+                ':order' => $order,
+                ':updated_at' => $updated_at
+            ]);
+        }
     } catch (PDOException $e) { error_log("DB upsert failed for $id: " . $e->getMessage()); }
 }
 
@@ -225,12 +441,21 @@ function db_orphans(): array
   $pdo = db();
   $r = redis_client();
   $redisIds = $r->zrange(REDIS_INDEX_KEY, 0, -1) ?: [];
+  try {
+    $catIds = $r->zrange(REDIS_CATEGORIES_INDEX, 0, -1) ?: [];
+    foreach ($catIds as $cid) {
+      $ids = $r->zrange(category_index_key($cid), 0, -1) ?: [];
+      $redisIds = array_merge($redisIds, $ids);
+    }
+  } catch (Throwable $e) {}
   $in = $redisIds ? str_repeat('?,', count($redisIds)-1).'?' : null;
   if (!$in) {
-    $stmt = $pdo->query("SELECT id, name, txt, `order`, updated_at FROM cards ORDER BY updated_at DESC LIMIT 500");
+    $cols = db_supports_categories() ? "id, name, category_id, txt, `order`, updated_at" : "id, name, txt, `order`, updated_at";
+    $stmt = $pdo->query("SELECT $cols FROM cards ORDER BY updated_at DESC LIMIT 500");
     return $stmt->fetchAll();
   }
-  $stmt = $pdo->prepare("SELECT id, name, txt, `order`, updated_at FROM cards WHERE id NOT IN ($in) ORDER BY updated_at DESC LIMIT 500");
+  $cols = db_supports_categories() ? "id, name, category_id, txt, `order`, updated_at" : "id, name, txt, `order`, updated_at";
+  $stmt = $pdo->prepare("SELECT $cols FROM cards WHERE id NOT IN ($in) ORDER BY updated_at DESC LIMIT 500");
   $stmt->execute($redisIds);
   return $stmt->fetchAll();
 }
@@ -333,8 +558,15 @@ function version_get_full(int $versionId): ?array
 function version_restore(int $versionId): bool
 {
   $row = version_get_full($versionId); if (!$row) return false;
+  $catId = 'root';
+  try {
+    $existing = redis_client()->hgetall("card:{$row['card_id']}");
+    if ($existing && isset($existing['category_id'])) {
+      $catId = normalize_category_id($existing['category_id']);
+    }
+  } catch (Throwable $e) {}
   // Upsert into Redis & stream
-  redis_upsert_card($row['card_id'], $row['txt'], (int)$row['order'], (string)($row['name'] ?? ''));
+  redis_upsert_card($row['card_id'], $row['txt'], (int)$row['order'], (string)($row['name'] ?? ''), $catId);
   // Record restore snapshot (forced)
   version_insert($row['card_id'], (string)$row['name'], $row['txt'], (int)$row['order'], 'restore', true);
   return true;

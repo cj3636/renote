@@ -3,17 +3,23 @@ const bootEl = document.getElementById('bootstrap');
 let serverState = {};
 try { serverState = JSON.parse(bootEl?.textContent || '{}'); } catch {}
 // Local-first boot, then reconcile with server to avoid device divergence.
-let state = store.get('cards_state', null) || serverState || {cards:[], updated_at:0};
+let state = store.get('cards_state', null) || serverState || {cards:[], categories:[], updated_at:0};
 state.cards ||= [];
+state.categories ||= [];
+const ROOT_CATEGORY = 'root';
+function normalizeCategory(cid) { return (!cid || cid === ROOT_CATEGORY) ? ROOT_CATEGORY : String(cid); }
+state.cards = state.cards.map(c=> ({ ...c, category_id: normalizeCategory(c.category_id) }));
 
 // Track whether we've synced after boot so we don't show placeholder titles for long.
 let initialSynced = false;
 
 const grid = document.getElementById('grid');
 const addBtn = document.getElementById('addCardBtn');
+const addCategoryBtn = document.getElementById('addCategoryBtn');
 const modal = document.getElementById('modal');
 const backdrop = modal?.querySelector('.backdrop');
 const nameInput = document.getElementById('nameInput');
+const categorySelect = document.getElementById('categorySelect');
 const editor = document.getElementById('editor');
 const closeModalBtn = document.getElementById('closeModal');
 const trashBtn = document.getElementById('trashBtn');
@@ -39,6 +45,26 @@ const API = {
   history: () => fetch('src/Api/index.php?action=history', {cache:'no-store'}).then(r=>r.json()),
   historyPurge: (id)=> fetch('src/Api/index.php?action=history_purge',{method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id})}).then(r=>r.json()),
   historyRestore: (id)=> fetch('src/Api/index.php?action=history_restore',{method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id})}).then(r=>r.json()),
+  saveCategory: (cat)=> fetch('src/Api/index.php?action=save_category', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(cat)}).then(r=>r.json()),
+  deleteCategory: (id)=> fetch('src/Api/index.php?action=delete_category', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id})}).then(r=>r.json()),
+};
+
+const categoriesList = () => {
+  const cats = [...(state.categories||[])].sort((a,b)=>a.order-b.order);
+  return [{id:ROOT_CATEGORY, name:'Uncategorized', order:-1, system:true}, ...cats];
+};
+const cardsInCategory = (catId) => state.cards.filter(c=>normalizeCategory(c.category_id)===normalizeCategory(catId)).sort((a,b)=>a.order-b.order);
+const nextOrderForCategory = (catId) => {
+  const list = cardsInCategory(catId);
+  if (!list.length) return 0;
+  return Math.max(...list.map(c=>c.order|0)) + 1;
+};
+const resequenceCategory = (catId) => {
+  const list = cardsInCategory(catId);
+  list.forEach((c,i)=>{ c.order=i; });
+};
+const resequenceCategories = () => {
+  state.categories.sort((a,b)=>a.order-b.order).forEach((c,i)=>{ c.order=i; });
 };
 
 const uid = () => crypto.randomUUID?.() || (Date.now().toString(36)+Math.random().toString(36).slice(2));
@@ -55,7 +81,7 @@ const previewSnippet = (t, maxLines=9, maxChars=600) => {
     if (trimmed.join('\n').length > maxChars) break;
   }
   let out = trimmed.join('\n');
-  if (out.length > maxChars) out = out.slice(0, maxChars - 1) + '…';
+  if (out.length > maxChars) out = out.slice(0, maxChars - 1) + 'â€¦';
   return out;
 };
 const debounce = (fn, ms=400)=>{ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), ms); }; };
@@ -66,6 +92,7 @@ const serverSaveDebounced = debounce(async (card)=> {
       const local = state.cards.find(c=>c.id===card.id);
       if (local) {
         local.updated_at = res.updated_at|0;
+        if (res.category_id) local.category_id = res.category_id;
         saveLocal();
       }
     }
@@ -85,6 +112,85 @@ let dragMeta = {
   committed: false
 };
 
+function addCard(catId = ROOT_CATEGORY) {
+  const categoryId = normalizeCategory(catId);
+  const id = uid(); const order = nextOrderForCategory(categoryId);
+  const card = { id, name:'', text:'', order, updated_at: Date.now()/1000|0, category_id: categoryId };
+  state.cards.push(card); saveLocal(); render(); queueServerSave(card);
+  ensureCategorySelectOptions(categoryId);
+  setTimeout(()=>openModal(id), 0);
+}
+
+function moveCardToCategory(card, newCategoryId) {
+  const target = normalizeCategory(newCategoryId);
+  const prev = normalizeCategory(card.category_id);
+  if (target === prev) return;
+  // Normalize orders: remove from previous sequence then append to target
+  resequenceCategory(prev);
+  card.category_id = target;
+  card.order = nextOrderForCategory(target);
+  card.updated_at = Date.now()/1000|0;
+  resequenceCategory(target);
+  saveLocal();
+  queueServerSave(card);
+  render();
+  ensureCategorySelectOptions(target);
+}
+
+async function renameCategory(cat) {
+  const name = prompt('Category name', cat.name || '');
+  if (name === null) return;
+  const trimmed = name.trim();
+  if (!trimmed) return;
+  cat.name = trimmed;
+  cat.updated_at = Date.now()/1000|0;
+  saveLocal();
+  try { await API.saveCategory({id: cat.id, name: trimmed, order: cat.order}); } catch {}
+  ensureCategorySelectOptions();
+  render();
+}
+
+async function deleteCategory(catId) {
+  if (!confirm('Delete this category? It must be empty first.')) return;
+  try {
+    const res = await API.deleteCategory(catId);
+    if (!res.ok) { alert(res.error || 'Delete failed'); return; }
+    state.categories = state.categories.filter(c=>c.id!==catId);
+    saveLocal(); render(); ensureCategorySelectOptions();
+  } catch { alert('Delete failed'); }
+}
+
+async function bumpCategory(catId, delta) {
+  const idx = state.categories.findIndex(c=>c.id===catId);
+  if (idx === -1) return;
+  const swap = idx + delta;
+  if (swap < 0 || swap >= state.categories.length) return;
+  const tmp = state.categories[swap];
+  state.categories[swap] = state.categories[idx];
+  state.categories[idx] = tmp;
+  resequenceCategories();
+  saveLocal();
+  // Persist new orders
+  try {
+    await Promise.all(state.categories.map(c=> API.saveCategory({id:c.id, name:c.name, order:c.order})));
+  } catch {}
+  render();
+  ensureCategorySelectOptions();
+}
+
+function ensureCategorySelectOptions(selectedId) {
+  if (!categorySelect) return;
+  const current = normalizeCategory(selectedId || categorySelect.value || ROOT_CATEGORY);
+  categorySelect.innerHTML = '';
+  categoriesList().forEach(cat => {
+    const opt = document.createElement('option');
+    opt.value = cat.id;
+    opt.textContent = cat.name || cat.id;
+    categorySelect.appendChild(opt);
+  });
+  categorySelect.value = current;
+}
+
 function makePlaceholder(height=0) {
   const ph = document.createElement('div');
   ph.className = 'card-placeholder';
@@ -95,158 +201,170 @@ function makePlaceholder(height=0) {
 // ===== Render grid =====
 function render() {
   grid.innerHTML = '';
-  state.cards.sort((a,b)=>a.order-b.order).forEach(card => {
+  categoriesList().forEach(cat => renderCategory(cat));
+}
+
+function renderCategory(cat) {
+  const section = document.createElement('section');
+  section.className = 'category-section glass elevate';
+  section.dataset.categoryId = cat.id;
+
+  const header = document.createElement('div');
+  header.className = 'category-header';
+  const title = document.createElement('div');
+  title.className = 'category-title';
+  title.textContent = (cat.name || '').trim() || (cat.id === ROOT_CATEGORY ? 'Uncategorized' : '-');
+  header.appendChild(title);
+
+  const actions = document.createElement('div');
+  actions.className = 'category-actions';
+  const addCardBtn = document.createElement('button');
+  addCardBtn.className = 'icon-btn';
+  addCardBtn.title = 'Add card to this category';
+  addCardBtn.textContent = '+';
+  addCardBtn.addEventListener('click', ()=> addCard(cat.id));
+  actions.appendChild(addCardBtn);
+
+  if (cat.id !== ROOT_CATEGORY) {
+    const renameBtn = document.createElement('button');
+    renameBtn.className = 'icon-btn';
+    renameBtn.title = 'Rename category';
+    renameBtn.textContent = '✎';
+    renameBtn.addEventListener('click', ()=> renameCategory(cat));
+    actions.appendChild(renameBtn);
+
+    const moveUp = document.createElement('button');
+    moveUp.className = 'icon-btn';
+    moveUp.title = 'Move up';
+    moveUp.textContent = '↑';
+    moveUp.addEventListener('click', ()=> bumpCategory(cat.id, -1));
+    actions.appendChild(moveUp);
+
+    const moveDown = document.createElement('button');
+    moveDown.className = 'icon-btn';
+    moveDown.title = 'Move down';
+    moveDown.textContent = '↓';
+    moveDown.addEventListener('click', ()=> bumpCategory(cat.id, 1));
+    actions.appendChild(moveDown);
+
+    const delBtn = document.createElement('button');
+    delBtn.className = 'icon-btn danger';
+    delBtn.title = 'Delete category (only when empty)';
+    delBtn.textContent = '🗑';
+    delBtn.disabled = cardsInCategory(cat.id).length > 0;
+    delBtn.addEventListener('click', ()=> deleteCategory(cat.id));
+    actions.appendChild(delBtn);
+  }
+  header.appendChild(actions);
+
+  section.appendChild(header);
+  const subGrid = document.createElement('div');
+  subGrid.className = 'grid subgrid';
+  subGrid.dataset.categoryId = cat.id;
+  section.appendChild(subGrid);
+  grid.appendChild(section);
+
+  renderCategoryCards(cat.id, subGrid);
+}
+
+function renderCategoryCards(catId, subGrid) {
+  subGrid.innerHTML = '';
+  const cards = cardsInCategory(catId);
+  cards.forEach(card => {
     const el = document.createElement('div');
     el.className = 'card';
     el.dataset.id = card.id;
+    el.dataset.categoryId = catId;
 
     const handle = document.createElement('div');
     handle.className = 'card-handle';
     const grab = document.createElement('div');
     grab.className = 'grab';
-    grab.textContent = '⋮⋮';
+    grab.textContent = '≡';
     grab.title = 'Drag';
     const title = document.createElement('div');
     title.className = 'title';
-    title.textContent = (card.name || '').trim() || '—';
+    title.textContent = (card.name || '').trim() || '-';
     handle.append(grab, title);
 
     const blurb = document.createElement('div');
     blurb.className = 'card-blurb';
-  blurb.textContent = previewSnippet(card.text) || '…';
+    blurb.textContent = previewSnippet(card.text) || '.';
 
     el.appendChild(handle);
     el.appendChild(blurb);
-    grid.appendChild(el);
+    subGrid.appendChild(el);
 
-    // Clicking anywhere except the grab opens modal
     handle.addEventListener('click', (e)=> { if (e.target === grab) return; openModal(card.id); });
     blurb.addEventListener('click', ()=> openModal(card.id));
 
-    // ---- Drag & Drop (handle-only) ----
-  // We drag only via the grab handle. The card itself is moved on drop.
-  let dragId=null;
-    grab.setAttribute('draggable','true');
-    grab.addEventListener('dragstart', (e)=> {
-      dragId = card.id;
-      e.dataTransfer.effectAllowed = 'move';
-      e.dataTransfer.setData('text/plain', dragId);
-      el.classList.add('dragging');
-      // Build placeholder
-      dragMeta.id = card.id;
-      dragMeta.dragging = el;
-      dragMeta.startIndex = [...grid.children].indexOf(el);
-      dragMeta.placeholder = makePlaceholder(el.getBoundingClientRect().height);
-      dragMeta.active = true;
-      // Insert placeholder immediately after dragging el to preserve space
-      el.parentNode.insertBefore(dragMeta.placeholder, el.nextSibling);
-      // Custom drag image (clone mini)
-      const clone = el.cloneNode(true);
-      clone.style.width = el.getBoundingClientRect().width + 'px';
-      clone.style.position = 'absolute';
-      clone.style.top = '-9999px';
-      clone.style.pointerEvents = 'none';
-      clone.style.opacity = '0.85';
-      document.body.appendChild(clone);
-      try { e.dataTransfer.setDragImage(clone, clone.offsetWidth/2, 20); } catch {}
-      setTimeout(()=> clone.remove(), 0);
-    });
-    grab.addEventListener('dragend', (e)=> {
-      el.classList.remove('dragging');
-      finalizeDrag(e);
-    });
-    // (Per-card dragover no longer needed; global grid handler manages placeholder.)
+    attachCardDrag(el, grab, catId, subGrid);
   });
 }
 
-// Removed continuous visual reorders to prevent flicker – we only move placeholder.
+// Simplified drag/drop per category grid
+function attachCardDrag(cardEl, grabEl, catId, container) {
+  grabEl.setAttribute('draggable', 'true');
+  grabEl.addEventListener('dragstart', (e)=> {
+    dragMeta = {
+      dragging: cardEl,
+      id: cardEl.dataset.id,
+      startIndex: [...container.children].indexOf(cardEl),
+      placeholder: makePlaceholder(cardEl.getBoundingClientRect().height),
+      active: true,
+      committed: false,
+      catId,
+      container,
+    };
+    cardEl.classList.add('dragging');
+    container.insertBefore(dragMeta.placeholder, cardEl.nextSibling);
+    e.dataTransfer.effectAllowed = 'move';
+    try { e.dataTransfer.setData('text/plain', dragMeta.id); } catch {}
+  });
+  grabEl.addEventListener('dragend', ()=> finalizeDrag(catId, container));
+  container.addEventListener('dragover', (e)=> {
+    if (!dragMeta.active || dragMeta.catId !== catId) return;
+    e.preventDefault();
+    const ph = dragMeta.placeholder;
+    if (!ph) return;
+    const target = e.target.closest('.card');
+    if (!target || target === ph || target === dragMeta.dragging) {
+      if (ph.parentNode !== container) container.appendChild(ph);
+      return;
+    }
+    container.insertBefore(ph, target);
+  });
+}
 
-function finalizeDrag(e) {
-  if (!dragMeta.active) return;
+function finalizeDrag(catId, container) {
+  if (!dragMeta.active || dragMeta.catId !== catId) { dragMeta = { dragging:null, id:null, startIndex:-1, placeholder:null, active:false, committed:false }; return; }
   const ph = dragMeta.placeholder;
   const movedEl = dragMeta.dragging;
-  const movedId = dragMeta.id;
-  const validDrop = e && ph && grid.contains(ph);
-  if (validDrop) {
-    // Place original element where placeholder sits
-    grid.insertBefore(movedEl, ph);
-    // Compute new order from DOM sequence
-    const ids = [...grid.querySelectorAll('.card')].map(c=>c.dataset.id);
-    const cards = state.cards.sort((a,b)=>a.order-b.order);
-    const byId = Object.fromEntries(cards.map(c=>[c.id,c]));
-    ids.forEach((id,i)=>{ const c = byId[id]; if (c) c.order = i; });
-    // Bump updated_at locally to make sure reconcile treats order change as newer
-    const nowSec = Date.now()/1000|0;
-    cards.forEach(c=>{ c.updated_at = nowSec; });
-    saveLocal();
-    // Force bulk save via fetch (ignore sendBeacon path) so we know it executes.
-    try {
-      fetch('src/Api/index.php?action=bulk_save', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({cards: cards.map(c=>({id:c.id, text:c.text, order:c.order, name:c.name||''}))}) });
-    } catch {}
+  if (ph && container.contains(ph) && movedEl) {
+    container.insertBefore(movedEl, ph);
   }
-  // Restore visibility
-  if (movedEl) movedEl.style.removeProperty('display');
   ph?.remove();
+  const ids = [...container.querySelectorAll('.card')].map(c=>c.dataset.id);
+  const nowSec = Date.now()/1000|0;
+  const catCards = cardsInCategory(catId);
+  const byId = Object.fromEntries(catCards.map(c=>[c.id,c]));
+  ids.forEach((id,i)=>{ const c = byId[id]; if (c) { c.order=i; c.updated_at=nowSec; } });
+  saveLocal();
+  // Persist order for this category explicitly
+  try {
+    fetch('src/Api/index.php?action=bulk_save', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({cards: catCards.map(c=>({id:c.id, text:c.text, order:c.order, name:c.name||'', category_id:c.category_id||ROOT_CATEGORY}))}) });
+  } catch {}
   dragMeta = { dragging:null, id:null, startIndex:-1, placeholder:null, active:false, committed:false };
 }
-
-// Global dragover on grid to allow placeholder at end and live reorder preview
-grid.addEventListener('dragover', (e)=> {
-  if (!dragMeta.active) return; e.preventDefault();
-  const ph = dragMeta.placeholder; if (!ph) return;
-  const pointerX = e.clientX; const pointerY = e.clientY;
-  const cards = [...grid.querySelectorAll('.card:not(.dragging)')];
-  if (!cards.length) { grid.appendChild(ph); return; }
-
-  // Build row groupings by vertical center proximity (tolerant clustering)
-  const rows = [];
-  const rowTolerance = 40; // px
-  cards.forEach(card => {
-    const r = card.getBoundingClientRect();
-    const centerY = r.top + r.height/2;
-    let row = rows.find(row => Math.abs(row.centerY - centerY) < rowTolerance);
-    if (!row) { row = { centerY, items: [] }; rows.push(row); }
-    row.items.push({ el: card, rect: r });
-  });
-  rows.sort((a,b)=>a.centerY - b.centerY);
-  rows.forEach(row => row.items.sort((a,b)=>a.rect.left - b.rect.left));
-
-  // Determine target row: closest centerY below pointer OR last row
-  let targetRow = rows[0];
-  for (const row of rows) {
-    if (pointerY >= row.centerY - rowTolerance && pointerY <= row.centerY + rowTolerance) { targetRow = row; break; }
-    if (pointerY > row.centerY) targetRow = row; // fallback to last passed row
-  }
-
-  // Within row decide position by comparing pointerX to item midpoints
-  let insertBefore = null;
-  for (const item of targetRow.items) {
-    const midX = item.rect.left + item.rect.width/2;
-    if (pointerX < midX) { insertBefore = item.el; break; }
-  }
-
-  if (!insertBefore) {
-    // append to end of target row: find last element in that row's DOM order
-    const lastEl = targetRow.items[targetRow.items.length-1].el;
-    // Insert after lastEl (which in DOM means before next sibling of lastEl)
-    if (lastEl.nextSibling !== ph) {
-      if (lastEl.nextSibling) grid.insertBefore(ph, lastEl.nextSibling); else grid.appendChild(ph);
-    }
-  } else if (insertBefore !== ph) {
-    grid.insertBefore(ph, insertBefore);
-  }
-});
-
-// Legacy getDragAfterElement removed in favor of row-aware positioning.
 
 // Cancel if ESC pressed during drag
 document.addEventListener('keydown', (e)=>{
   if (e.key==='Escape' && dragMeta.active) {
-    finalizeDrag(null); // cancels
+    dragMeta.placeholder?.remove();
+    dragMeta = { dragging:null, id:null, startIndex:-1, placeholder:null, active:false, committed:false };
     render(); // restore canonical order
   }
 });
-
 // ===== Modal =====
 function openModal(id) {
   currentId = id;
@@ -254,6 +372,8 @@ function openModal(id) {
   if (!card) return;
   editor.value = card.text || '';
   nameInput.value = (card.name || '').trim();
+  ensureCategorySelectOptions(card.category_id);
+  if (categorySelect) categorySelect.value = normalizeCategory(card.category_id);
   modal.classList.remove('hidden');
   modal.setAttribute('aria-hidden','false');
   editor.focus();
@@ -282,7 +402,7 @@ editor?.addEventListener('input', ()=>{
   saveLocal();
   queueServerSave(card);
   const el = grid.querySelector(`.card[data-id="${card.id}"] .card-blurb`);
-  if (el) el.textContent = previewSnippet(card.text) || '…';
+  if (el) el.textContent = previewSnippet(card.text) || 'â€¦';
 });
 
 // Save name on blur & Enter
@@ -297,7 +417,13 @@ nameInput?.addEventListener('blur', ()=>{
   saveLocal();
   queueServerSave(card);
   const t = grid.querySelector(`.card[data-id="${card.id}"] .card-handle .title`);
-  if (t) t.textContent = val || '—';
+  if (t) t.textContent = val || '-';
+});
+categorySelect?.addEventListener('change', ()=>{
+  if (!currentId) return;
+  const card = state.cards.find(c=>c.id===currentId);
+  if (!card) return;
+  moveCardToCategory(card, categorySelect.value);
 });
 
 // Double-prompt trash
@@ -310,22 +436,38 @@ trashBtn?.addEventListener('click', ()=>{
   }
   // Soft delete (Redis only)
   const id = currentId;
+  const card = state.cards.find(c=>c.id===id);
+  const catId = card ? normalizeCategory(card.category_id) : ROOT_CATEGORY;
   closeModal();
-  state.cards = state.cards.filter(c=>c.id!==id).map((c,i)=>({ ...c, order:i }));
+  state.cards = state.cards.filter(c=>c.id!==id);
+  resequenceCategory(catId);
   saveLocal(); render();
   API.deleteCard(id);
 });
 
 // Add card
 addBtn?.addEventListener('click', ()=>{
-  const id = uid(); const order = state.cards.length;
-  const card = { id, name:'', text:'', order, updated_at: Date.now()/1000|0 };
-  state.cards.push(card); saveLocal(); render(); queueServerSave(card);
-  setTimeout(()=>openModal(id), 0);
+  addCard(ROOT_CATEGORY);
+});
+
+addCategoryBtn?.addEventListener('click', async ()=>{
+  const name = prompt('New category name');
+  if (name === null) return;
+  const trimmed = name.trim(); if (!trimmed) return;
+  const order = state.categories.length;
+  try {
+    const res = await API.saveCategory({name: trimmed, order});
+    if (res && res.ok && res.category) {
+      state.categories.push(res.category);
+      saveLocal(); render(); ensureCategorySelectOptions(res.category.id);
+    } else {
+      alert(res.error || 'Create failed');
+    }
+  } catch { alert('Create failed'); }
 });
 
 function queueServerSave(card) {
-  serverSaveDebounced({ id: card.id, name: card.name||'', text: card.text, order: card.order|0 });
+  serverSaveDebounced({ id: card.id, name: card.name||'', text: card.text, order: card.order|0, category_id: card.category_id || ROOT_CATEGORY });
 }
 function saveLocal(){ store.set('cards_state', state); }
 
@@ -372,7 +514,7 @@ historyBtn?.addEventListener('click', async ()=>{
       versionsPanel = document.createElement('div');
       versionsPanel.className='versions-panel';
       versionsPanel.style.display='none';
-      versionsPanel.innerHTML = `<div class="versions-header"><select id="versionsCardSelect"></select><button class="icon-btn" id="snapshotBtn">Snapshot Now</button></div><div id="versionsList" class="versions-list muted">Select a card to load versions…</div><div id="versionDiff" class="version-diff"></div>`;
+      versionsPanel.innerHTML = `<div class="versions-header"><select id="versionsCardSelect"></select><button class="icon-btn" id="snapshotBtn">Snapshot Now</button></div><div id="versionsList" class="versions-list muted">Select a card to load versionsâ€¦</div><div id="versionDiff" class="version-diff"></div>`;
   historyList.parentElement.appendChild(versionsPanel);
       // Populate select with current in-memory cards
       const select = versionsPanel.querySelector('#versionsCardSelect');
@@ -390,7 +532,7 @@ historyBtn?.addEventListener('click', async ()=>{
       orphans.forEach(o=>{
         const row = document.createElement('div');
         row.className='history-row';
-        const name = (o.name||'').trim() || '—';
+        const name = (o.name||'').trim() || 'â€”';
         const preview = (o.txt||'').slice(0,120).replace(/\s+/g,' ');
         row.innerHTML = `
           <div><strong>${name}</strong> <code>${o.id}</code></div>
@@ -426,7 +568,7 @@ drawer?.addEventListener('click', (e)=>{
 });
 
 async function loadVersions(cardId){
-  if(!cardId) return; versionsState.cardId = cardId; const listEl = versionsPanel.querySelector('#versionsList'); listEl.textContent='Loading versions…';
+  if(!cardId) return; versionsState.cardId = cardId; const listEl = versionsPanel.querySelector('#versionsList'); listEl.textContent='Loading versionsâ€¦';
   try{
     const res = await fetch(`src/Api/index.php?action=versions_list&id=${encodeURIComponent(cardId)}&limit=25`);
     const j = await res.json(); if(!j.ok) throw new Error(j.error||'fail');
@@ -444,7 +586,7 @@ async function loadVersions(cardId){
 }
 
 async function showVersionDiff(versionId){
-  const diffEl = versionsPanel.querySelector('#versionDiff'); diffEl.textContent='Loading…';
+  const diffEl = versionsPanel.querySelector('#versionDiff'); diffEl.textContent='Loadingâ€¦';
   try{
     const res = await fetch(`src/Api/index.php?action=version_get&version_id=${versionId}`);
     const j = await res.json(); if(!j.ok) throw new Error(j.error||'fail');
@@ -511,7 +653,7 @@ function computeLineDiff(oldText, newText) {
   const a = oldText.split(/\r?\n/);
   const b = newText.split(/\r?\n/);
   const n = a.length, m = b.length;
-  // Guard for huge texts – fall back to simple comparison to avoid O(n*m) blowup
+  // Guard for huge texts â€“ fall back to simple comparison to avoid O(n*m) blowup
   if (n*m > 160000) { // ~400x400 lines threshold
     // Fallback: mark differing lines naively
     const max = Math.max(n,m);
@@ -547,6 +689,7 @@ function computeLineDiff(oldText, newText) {
 
 // ===== Initial render =====
 render();
+ensureCategorySelectOptions();
 
 // ===== Reconciliation Logic =====
 async function reconcileWithServer(force = false) {
@@ -554,64 +697,101 @@ async function reconcileWithServer(force = false) {
     const remote = await API.state();
     if (!remote || !Array.isArray(remote.cards)) return;
 
-    // Build map of existing local cards by id
+    // Merge categories
+    const remoteCats = Array.isArray(remote.categories) ? remote.categories : [];
+    const localCatMap = Object.fromEntries((state.categories||[]).map(c=>[c.id,c]));
+    let catsChanged = false;
+    const mergedCats = [];
+    for (const rc of remoteCats) {
+      const lc = localCatMap[rc.id];
+      if (!lc) {
+        mergedCats.push({ id: rc.id, name: rc.name||'', order: rc.order|0, updated_at: rc.updated_at|0 });
+        catsChanged = true;
+      } else {
+        const needs = (rc.updated_at|0) > (lc.updated_at|0) || lc.name !== rc.name || (lc.order|0) !== (rc.order|0);
+        if (needs) {
+          lc.name = rc.name||'';
+          lc.order = rc.order|0;
+          lc.updated_at = rc.updated_at|0;
+          catsChanged = true;
+        }
+        mergedCats.push(lc);
+        delete localCatMap[rc.id];
+      }
+    }
+    // Keep/persist local-only categories (created offline)
+    Object.values(localCatMap).forEach(c=> {
+      mergedCats.push(c);
+      catsChanged = true;
+      try { API.saveCategory({id:c.id, name:c.name, order:c.order}); } catch {}
+    });
+    mergedCats.sort((a,b)=>a.order-b.order).forEach((c,i)=>{ c.order = (c.id===ROOT_CATEGORY)?c.order:i; });
+
+    // Merge cards
     const localMap = Object.fromEntries(state.cards.map(c=>[c.id,c]));
     let changed = false;
-
-    // Merge: for each remote card, if missing locally add; if remote newer, update
     const merged = [];
     for (const rc of remote.cards) {
       const lc = localMap[rc.id];
-      if (!lc) { // new card from server not on this device
-        merged.push({ id: rc.id, name: rc.name||'', text: rc.text||'', order: rc.order|0, updated_at: rc.updated_at|0 });
+      const cat = normalizeCategory(rc.category_id);
+      if (!lc) {
+        merged.push({ id: rc.id, name: rc.name||'', text: rc.text||'', order: rc.order|0, updated_at: rc.updated_at|0, category_id: cat });
         changed = true;
       } else {
-        // If remote more recent OR local has missing name while remote has one, update fields
-        const needsUpdate = (rc.updated_at|0) > (lc.updated_at|0) || (!lc.name && rc.name);
+        const needsUpdate = (rc.updated_at|0) > (lc.updated_at|0) || (!lc.name && rc.name) || normalizeCategory(lc.category_id)!==cat;
         if (needsUpdate) {
           lc.name = rc.name||'';
           lc.text = rc.text||'';
           lc.order = rc.order|0;
           lc.updated_at = rc.updated_at|0;
+          lc.category_id = cat;
           changed = true;
         }
         merged.push(lc);
         delete localMap[rc.id];
       }
     }
-    // Any leftover local-only cards (not on server).
     const leftovers = Object.values(localMap);
     if (leftovers.length) {
       const nowSec = Date.now()/1000|0;
       for (const c of leftovers) {
-        // If card has never been synced (no updated_at) treat as new and push upstream.
         if (!c.updated_at) {
           queueServerSave(c);
           merged.push(c);
           continue;
         }
-        // If it has been synced before but is absent remotely, assume it was deleted elsewhere -> drop locally.
-        // Grace period: if last update < 5s ago, keep (could be race with remote flush lag).
         if ((nowSec - c.updated_at) < 5) {
-          merged.push(c); // keep during grace window
+          merged.push(c);
         } else {
-          changed = true; // pruning
+          changed = true;
         }
       }
     }
-    // Normalize order indexes (server authoritative order wins where clash)
-    merged.sort((a,b)=>a.order-b.order).forEach((c,i)=>{ c.order = i; });
+    // Normalize order within each category
+    const grouped = {};
+    merged.forEach(c=>{
+      const cid = normalizeCategory(c.category_id);
+      if (!grouped[cid]) grouped[cid]=[];
+      grouped[cid].push(c);
+    });
+    Object.values(grouped).forEach(list=> list.sort((a,b)=>a.order-b.order).forEach((c,i)=>{ c.order = i; }));
+
+    if (catsChanged || force) {
+      state.categories = mergedCats.filter(c=>c.id!==ROOT_CATEGORY);
+      resequenceCategories();
+      changed = true;
+    }
     if (changed || force) {
       state.cards = merged;
       saveLocal();
       render();
+      ensureCategorySelectOptions();
     }
     initialSynced = true;
   } catch (e) {
     // silent – offline maybe
   }
 }
-
 // Perform initial reconciliation shortly after boot (allow first paint), then periodic lightweight sync
 setTimeout(()=>reconcileWithServer(true), 150);
 setInterval(()=>reconcileWithServer(false), 15000); // every 15s

@@ -48,10 +48,11 @@
 - Soft delete: removed from Redis but recoverable from MariaDB until flush purges
 - History drawer (UI) to restore or purge DB‑only cards
 - Per-card version snapshots (automatic on flush + manual) with retention & restore
-- Flush button (debug mode) now also triggers an immediate state re‑sync after write‑behind flush
+- Flush button (debug mode) now also triggers an immediate state re-sync after write-behind flush
 - Health indicator (lag classification: ok / degraded / backlog)
 - Adaptive stream flush batch sizing
 - Stream trimming to prevent unbounded growth
+- Categories with nested card grids; categories cannot be deleted while non-empty
 
 ---
 
@@ -80,7 +81,15 @@ USE pnotes;
 CREATE TABLE IF NOT EXISTS cards (
   id         VARCHAR(64) PRIMARY KEY,
   name       VARCHAR(255) NULL,
+  category_id VARCHAR(64) NOT NULL DEFAULT 'root',
   txt        MEDIUMTEXT NOT NULL,
+  `order`    INT NOT NULL DEFAULT 0,
+  updated_at BIGINT NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE INDEX idx_cards_category_order ON cards (category_id, `order`);
+CREATE TABLE IF NOT EXISTS categories (
+  id         VARCHAR(64) PRIMARY KEY,
+  name       VARCHAR(255) NOT NULL,
   `order`    INT NOT NULL DEFAULT 0,
   updated_at BIGINT NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -141,6 +150,24 @@ Adjust interval in `renote.timer` to match `APP_BATCH_FLUSH_EXPECTED_INTERVAL` (
 
 ---
 
+## Migration (Categories)
+
+Before upgrading, take a backup of the `pnotes` database:
+
+```bash
+mysqldump -u <db_user> -p pnotes > pnotes-backup-$(date +%F).sql
+```
+
+Then run the idempotent migration to add `category_id` to `cards` and create the `categories` table:
+
+```bash
+php bin/migrate_categories.php
+```
+
+No Redis purge is required; existing cards become part of the root (uncategorized) bucket automatically.
+
+---
+
 ## Configuration
 
 `config.php` reads `.env` (via phpdotenv when available) and maps values to legacy constants. Prefer `.env` for deployment secrets, but either file stays in sync. `.env.example` documents every setting with defaults and warnings.
@@ -164,10 +191,13 @@ Systemd: copy `.env` to `/etc/renote.env` (or similar) and the provided `renote.
 | Layer | Purpose |
 |-------|---------|
 | Browser localStorage | Immediate offline resilience / rapid UX feedback |
-| Redis Hash `card:<id>` | Authoritative hot state (fields: id, name, text, order, updated_at) |
-| Redis Sorted Set `cards:index` | Global ordering of card IDs |
-| Redis Stream `cards:stream` | Append‑only change log for write‑behind worker |
-| MariaDB `cards` table | Durable persistence & history recovery |
+| Redis Hash `card:<id>` | Authoritative hot state (fields: id, name, text, category_id, order, updated_at) |
+| Redis Sorted Set `cards:index` | Ordering of uncategorized cards (root) |
+| Redis Sorted Set `categories:index` | Ordering of categories |
+| Redis Sorted Set `cat:<id>:cards` | Ordering of cards within a category |
+| Redis Stream `cards:stream` | Append-only change log for write-behind worker |
+| MariaDB `cards` table | Durable persistence & history recovery (includes `category_id`) |
+| MariaDB `categories` table | Durable categories (id, name, order, updated_at) |
 
 Flow:
 
@@ -183,22 +213,25 @@ Flow:
 | Action | Method | Params / Body | Notes |
 |--------|--------|---------------|-------|
 | `state` | GET | – | Full current state (Redis bootstrap) |
-| `save_card` | POST | `{id,name?,text,order}` | Upsert one card (ID + size validated) |
+| `save_card` | POST | `{id,name?,text,order,category_id?}` | Upsert one card (ID + size validated) |
 | `bulk_save` | POST | `{cards:[...]}` | Order + batch upserts (invalid cards skipped) |
+| `save_category` | POST | `{id?,name,order?}` | Create/update category (non-root) |
+| `delete_category` | POST | `{id}` | Delete empty category (fails if cards remain) |
 | `delete_card` | POST | `{id}` | Soft delete (Redis only) |
 | `history` | GET | – | DB rows not in Redis |
 | `history_restore` | POST | `{id}` | Rehydrate row into Redis (debug mode only) |
 | `history_purge` | POST | `{id}` | Permanently remove DB row (debug mode only) |
 | `flush_once` | GET | – | Run one worker batch (debug mode only) |
 | `trim_stream` | GET | `keep` | Approximate trim (debug mode only) |
-| `health` | GET | – | Lag & status classification |
-| `metrics` | GET | – | Cumulative saves/deletes + stream stats |
+| `health` | GET | - | Lag & status classification |
+| `metrics` | GET | - | Cumulative saves/deletes + stream stats |
 | `versions_list` | GET | `id, limit?` | List recent versions for a card |
 | `version_get` | GET | `version_id` | Retrieve a specific version (id + metadata + text) |
 | `version_restore` | POST | `{version_id}` | Restore version text into current card (new save event) |
 | `version_snapshot` | POST | `{id}` | Manual snapshot (bypasses interval/size heuristics) |
 
 All responses: `{ ok: boolean, ... }` or `{ ok:false, error: string }`.
+`state` includes both `cards` and `categories`; uncategorized cards use `category_id: "root"`.
 
 ### Validation & Limits
 

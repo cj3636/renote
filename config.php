@@ -86,6 +86,8 @@ define_env('PDO_MYSQL_SSL_CIPHER', 'DHE-RSA-AES256-GCM-SHA384');
 
 // ---- Redis keys (stable) ----------------------------------------------------
 define_env('REDIS_INDEX_KEY', 'cards:index');
+define_env('REDIS_CATEGORIES_INDEX', 'categories:index');
+define_env('REDIS_CATEGORY_PREFIX', 'category:');
 define_env('REDIS_UPDATED_AT', 'cards:updated_at');
 define_env('REDIS_STREAM', 'cards:stream');
 define_env('REDIS_STREAM_LAST', 'cards:stream:lastid');

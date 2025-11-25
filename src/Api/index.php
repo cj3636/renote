@@ -33,10 +33,11 @@ switch ($action) {
         $text = $in['text'] ?? '';
         $order = isset($in['order']) ? (int)$in['order'] : 0;
         $name  = isset($in['name']) ? (string)$in['name'] : '';
+        $categoryId = isset($in['category_id']) ? (string)$in['category_id'] : 'root';
         if (!$id) fail('id required');
         try { card_validate_id_and_text($id, $text); } catch (InvalidArgumentException $e) { fail($e->getMessage()); } catch (LengthException $e) { fail($e->getMessage()); }
-        $updated_at = redis_upsert_card($id, $text, $order, $name);
-        ok(['id' => $id, 'name'=>$name, 'text' => $text, 'order' => $order, 'updated_at' => $updated_at]);
+        $updated_at = redis_upsert_card($id, $text, $order, $name, $categoryId);
+        ok(['id' => $id, 'name'=>$name, 'text' => $text, 'order' => $order, 'category_id' => $categoryId, 'updated_at' => $updated_at]);
         break;
     case 'bulk_save':
         rl_check('bulk_save');
@@ -49,8 +50,9 @@ switch ($action) {
             $t = $c['text'] ?? '';
             $o = isset($c['order']) ? (int)$c['order'] : 0;
             $n = isset($c['name']) ? (string)$c['name'] : '';
+            $cat = isset($c['category_id']) ? (string)$c['category_id'] : 'root';
             try { card_validate_id_and_text($c['id'], $t); } catch (Throwable $e) { continue; }
-            $lastUpdated = redis_upsert_card($c['id'], $t, $o, $n);
+            $lastUpdated = redis_upsert_card($c['id'], $t, $o, $n, $cat);
         }
         ok(['updated_at' => $lastUpdated]);
         break;
@@ -98,6 +100,23 @@ switch ($action) {
             'last_flushed_id' => $lastId,
             'seconds_since_last_flush' => $sinceFlush
         ]);
+        break;
+    case 'save_category':
+        rl_check('save_category');
+        $in = json_input();
+        $id = $in['id'] ?? bin2hex(random_bytes(8));
+        $name = trim((string)($in['name'] ?? ''));
+        $order = isset($in['order']) ? (int)$in['order'] : 0;
+        if ($name === '') fail('name required');
+        $updated = redis_upsert_category($id, $name, $order);
+        ok(['category'=>['id'=>$id,'name'=>$name,'order'=>$order,'updated_at'=>$updated]]);
+        break;
+    case 'delete_category':
+        rl_check('delete_category');
+        $in = json_input();
+        $id = $in['id'] ?? null; if(!$id) fail('id required');
+        if (!delete_category($id)) fail('category_not_empty_or_invalid', 400);
+        ok(['deleted'=>$id]);
         break;
     case 'flush_once':
         rl_check('flush_once');
@@ -157,11 +176,13 @@ switch ($action) {
       $in = json_input();
       $id = $in['id'] ?? null;
       if (!$id) fail('id required');
-      $stmt = db()->prepare("SELECT id, name, txt, `order`, updated_at FROM cards WHERE id=?");
+      $cols = db_supports_categories() ? "id, name, category_id, txt, `order`, updated_at" : "id, name, txt, `order`, updated_at";
+      $stmt = db()->prepare("SELECT $cols FROM cards WHERE id=?");
       $stmt->execute([$id]);
       $row = $stmt->fetch();
       if (!$row) fail('not found',404);
-      redis_upsert_card($row['id'], $row['txt'], (int)$row['order'], $row['name'] ?? '');
+      $cat = array_key_exists('category_id', $row) ? $row['category_id'] : 'root';
+      redis_upsert_card($row['id'], $row['txt'], (int)$row['order'], $row['name'] ?? '', $cat);
       ok(['restored'=>$id]);
       break;
     // ----- Versioning / Backups -----
