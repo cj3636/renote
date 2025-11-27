@@ -45,3 +45,5 @@ ssl/*
 !ssl/.gitkeep            # keep a placeholder
 
 ROADMAP.md
+
+.env
