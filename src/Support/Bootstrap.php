@@ -312,17 +312,18 @@ function redis_upsert_category(string $id, string $name, int $order): int
 function category_card_count(string $categoryId): int
 {
   $categoryId = normalize_category_id($categoryId);
-  $r = redis_client();
-  try { return (int)$r->zcard(category_index_key($categoryId)); } catch (Throwable $e) {}
+  $redisCount = 0;
+  try { $redisCount = (int)redis_client()->zcard(category_index_key($categoryId)); } catch (Throwable $e) {}
+  $dbCount = 0;
   if (db_supports_categories()) {
     try {
       $stmt = db()->prepare("SELECT COUNT(*) AS c FROM cards WHERE category_id = ?");
       $stmt->execute([$categoryId]);
       $row = $stmt->fetch();
-      return (int)($row['c'] ?? 0);
+      $dbCount = (int)($row['c'] ?? 0);
     } catch (Throwable $e) {}
   }
-  return 0;
+  return max($redisCount, $dbCount);
 }
 
 function delete_category(string $categoryId): bool

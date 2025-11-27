@@ -74,6 +74,7 @@ body {
 }
 .icon-btn:hover { transform: translateY(-2px); background: rgba(255,255,255,0.08); border-color: var(--border-strong); }
 .icon-btn:active { transform: translateY(0); }
+.icon-btn:disabled { opacity: .55; cursor: not-allowed; transform: none; }
 .icon-btn.danger { background: linear-gradient(180deg, rgba(255,79,107,0.25), rgba(255,79,107,0.12)); border-color: rgba(255,79,107,0.55); }
 .icon-btn.restore { background: linear-gradient(180deg, rgba(106,240,217,0.25), rgba(106,240,217,0.12)); border-color: rgba(106,240,217,0.55); }
 .icon-btn.close { background: rgba(0,0,0,0.35); }
@@ -222,6 +223,7 @@ body {
 	display: flex; justify-content: flex-end; gap: 10px;
 	padding: 12px 16px; border-top: 1px solid var(--border);
 }
+.dialog-actions.inline-actions { border-top: 0; padding: 12px 0 6px; }
 .trash { background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02)); }
 .trash.armed { background: var(--danger); border-color: #ff9aa9; color:#fff; }
 .name-input {
@@ -230,6 +232,27 @@ body {
 	min-width: 40%; outline: none; font-weight:600; letter-spacing:.4px;
 }
 .name-input:focus { border-color: var(--accent); box-shadow: var(--focus-ring); }
+.text-input {
+	width: 100%;
+	background: rgba(0,0,0,0.32);
+	border: 1px solid var(--border);
+	color: var(--text);
+	border-radius: var(--radius-sm);
+	padding: 10px 12px;
+	font-size: 14px;
+	outline: none;
+	transition: border-color .2s ease, box-shadow .2s ease;
+}
+.text-input:focus { border-color: var(--accent); box-shadow: var(--focus-ring); }
+
+.dialog-slim { width: min(480px, calc(100vw - 42px)); }
+.dialog-header.simple { align-items: flex-start; }
+.dialog-titles { display: flex; flex-direction: column; gap: 4px; }
+.dialog-title { font-weight: 700; letter-spacing: .4px; }
+.dialog-subtitle { color: var(--text-dim); font-size: 13px; }
+.dialog-body { padding: 16px 18px; color: var(--text); line-height: 1.55; }
+.modal .dialog form { padding: 14px 16px 8px; display: flex; flex-direction: column; gap: 12px; }
+.icon-btn.primary { background: linear-gradient(180deg, rgba(122,162,255,0.25), rgba(122,162,255,0.12)); border-color: rgba(122,162,255,0.55); }
 
 .fullscreen .dialog { width: 96vw; height: 92vh; }
 .fullscreen #editor { height: calc(92vh - 140px); min-height: 0; resize: none; }

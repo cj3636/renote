@@ -27,3 +27,45 @@
     <div id="historyList" class="drawer-body"></div>
   </div>
 </div>
+
+<!-- Category name modal -->
+<div id="categoryModal" class="modal hidden simple-modal" aria-hidden="true" role="dialog" aria-modal="true">
+  <div class="backdrop" data-close="1"></div>
+  <div class="dialog dialog-slim" role="document">
+    <div class="dialog-header simple">
+      <div class="dialog-titles">
+        <div class="dialog-title" data-role="title">Category</div>
+        <div class="dialog-subtitle" data-role="subtitle">Name this category</div>
+      </div>
+      <div class="spacer"></div>
+      <button class="icon-btn close unified-close" data-close="1" aria-label="Close">x</button>
+    </div>
+    <form id="categoryForm">
+      <input id="categoryNameInput" class="text-input" placeholder="Category name" autocomplete="off" required />
+      <div class="dialog-actions inline-actions">
+        <button type="button" class="icon-btn" data-close="1">Cancel</button>
+        <button type="submit" class="icon-btn primary">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Confirm modal -->
+<div id="confirmModal" class="modal hidden simple-modal" aria-hidden="true" role="dialog" aria-modal="true">
+  <div class="backdrop" data-close="1"></div>
+  <div class="dialog dialog-slim" role="document">
+    <div class="dialog-header simple">
+      <div class="dialog-titles">
+        <div class="dialog-title" data-role="confirm-title">Confirm</div>
+        <div class="dialog-subtitle" data-role="confirm-subtitle"></div>
+      </div>
+      <div class="spacer"></div>
+      <button class="icon-btn close unified-close" data-close="1" aria-label="Close">x</button>
+    </div>
+    <div class="dialog-body" data-role="confirm-body"></div>
+    <div class="dialog-actions inline-actions">
+      <button type="button" class="icon-btn" data-close="1">Cancel</button>
+      <button type="button" class="icon-btn danger" data-role="confirm-accept">Delete</button>
+    </div>
+  </div>
+</div>

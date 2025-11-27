@@ -24,6 +24,16 @@ const editor = document.getElementById('editor');
 const closeModalBtn = document.getElementById('closeModal');
 const trashBtn = document.getElementById('trashBtn');
 const fullscreenBtn = document.getElementById('fullscreenBtn');
+const categoryModal = document.getElementById('categoryModal');
+const categoryForm = document.getElementById('categoryForm');
+const categoryNameInput = document.getElementById('categoryNameInput');
+const categoryTitleEl = categoryModal?.querySelector('[data-role="title"]');
+const categorySubtitleEl = categoryModal?.querySelector('[data-role="subtitle"]');
+const confirmModal = document.getElementById('confirmModal');
+const confirmTitleEl = confirmModal?.querySelector('[data-role="confirm-title"]');
+const confirmSubtitleEl = confirmModal?.querySelector('[data-role="confirm-subtitle"]');
+const confirmBodyEl = confirmModal?.querySelector('[data-role="confirm-body"]');
+const confirmAcceptBtn = confirmModal?.querySelector('[data-role="confirm-accept"]');
 
 const historyBtn = document.getElementById('historyBtn');
 const drawer = document.getElementById('historyDrawer');
@@ -138,7 +148,11 @@ function moveCardToCategory(card, newCategoryId) {
 }
 
 async function renameCategory(cat) {
-  const name = prompt('Category name', cat.name || '');
+  const name = await showCategoryNameDialog({
+    title: 'Rename category',
+    subtitle: 'Give this category a clear name',
+    initial: cat.name || ''
+  });
   if (name === null) return;
   const trimmed = name.trim();
   if (!trimmed) return;
@@ -151,7 +165,17 @@ async function renameCategory(cat) {
 }
 
 async function deleteCategory(catId) {
-  if (!confirm('Delete this category? It must be empty first.')) return;
+  const cat = state.categories.find(c=>c.id===catId);
+  const count = cardsInCategory(catId).length;
+  const confirmed = await showConfirmDialog({
+    title: 'Delete category',
+    subtitle: count ? `${count} card${count===1?'':'s'} remain. Move or delete them first.` : 'This cannot be undone.',
+    body: cat ? `Delete category "${cat.name || cat.id}"?` : 'Delete this category?',
+    confirmText: count ? 'Cannot delete (not empty)' : 'Delete',
+    danger: true,
+    disableAccept: count > 0
+  });
+  if (!confirmed) return;
   try {
     const res = await API.deleteCategory(catId);
     if (!res.ok) { alert(res.error || 'Delete failed'); return; }
@@ -196,6 +220,89 @@ function makePlaceholder(height=0) {
   ph.className = 'card-placeholder';
   ph.style.height = height ? height+ 'px' : '';
   return ph;
+}
+
+function hideOverlay(modalEl) {
+  if (!modalEl) return;
+  modalEl.classList.add('hidden');
+  modalEl.setAttribute('aria-hidden', 'true');
+}
+
+function showCategoryNameDialog(options = {}) {
+  return new Promise(resolve => {
+    const { title = 'Category', subtitle = 'Name this category', initial = '' } = options;
+  if (!categoryModal || !categoryForm || !categoryNameInput) {
+    const fallback = prompt(title, initial);
+    resolve(fallback ? fallback.trim() : null);
+    return;
+  }
+    if (categoryTitleEl) categoryTitleEl.textContent = title;
+    if (categorySubtitleEl) categorySubtitleEl.textContent = subtitle;
+    categoryNameInput.value = initial || '';
+    categoryModal.classList.remove('hidden');
+    categoryModal.setAttribute('aria-hidden', 'false');
+    setTimeout(()=> categoryNameInput.focus(), 20);
+    const closers = categoryModal.querySelectorAll('[data-close]');
+    const close = (val=null) => {
+      cleanup();
+      hideOverlay(categoryModal);
+      resolve(val);
+    };
+    const onSubmit = (e) => {
+      e.preventDefault();
+      const val = categoryNameInput.value.trim();
+      if (!val) { categoryNameInput.focus(); return; }
+      close(val);
+    };
+    const onCancel = (e) => { if (e) e.preventDefault(); close(null); };
+    const onKey = (e) => { if (e.key === 'Escape') onCancel(e); };
+    categoryForm.addEventListener('submit', onSubmit);
+    closers.forEach(el => el.addEventListener('click', onCancel));
+    document.addEventListener('keydown', onKey);
+    function cleanup() {
+      categoryForm.removeEventListener('submit', onSubmit);
+      closers.forEach(el => el.removeEventListener('click', onCancel));
+      document.removeEventListener('keydown', onKey);
+    }
+  });
+}
+
+function showConfirmDialog(options = {}) {
+  return new Promise(resolve => {
+    const { title = 'Confirm', subtitle = '', body = '', confirmText = 'Confirm', danger = false, disableAccept = false } = options;
+    if (!confirmModal || !confirmAcceptBtn) {
+      // Fallback to native confirm if modal missing
+      const ok = confirm(body || title);
+      resolve(ok);
+      return;
+    }
+    if (confirmTitleEl) confirmTitleEl.textContent = title;
+    if (confirmSubtitleEl) confirmSubtitleEl.textContent = subtitle || '';
+    if (confirmBodyEl) confirmBodyEl.textContent = body || '';
+    confirmAcceptBtn.textContent = confirmText;
+    confirmAcceptBtn.classList.toggle('danger', !!danger);
+    confirmAcceptBtn.disabled = !!disableAccept;
+    confirmModal.classList.remove('hidden');
+    confirmModal.setAttribute('aria-hidden', 'false');
+    setTimeout(()=> confirmAcceptBtn.focus(), 20);
+    const closers = confirmModal.querySelectorAll('[data-close]');
+    const close = (val=false) => {
+      cleanup();
+      hideOverlay(confirmModal);
+      resolve(val);
+    };
+    const onAccept = () => { if (!confirmAcceptBtn.disabled) close(true); };
+    const onCancel = (e) => { if (e) e.preventDefault(); close(false); };
+    const onKey = (e) => { if (e.key === 'Escape') onCancel(e); };
+    confirmAcceptBtn.addEventListener('click', onAccept);
+    closers.forEach(el => el.addEventListener('click', onCancel));
+    document.addEventListener('keydown', onKey);
+    function cleanup() {
+      confirmAcceptBtn.removeEventListener('click', onAccept);
+      closers.forEach(el => el.removeEventListener('click', onCancel));
+      document.removeEventListener('keydown', onKey);
+    }
+  });
 }
 
 // ===== Render grid =====
@@ -451,7 +558,11 @@ addBtn?.addEventListener('click', ()=>{
 });
 
 addCategoryBtn?.addEventListener('click', async ()=>{
-  const name = prompt('New category name');
+  const name = await showCategoryNameDialog({
+    title: 'New category',
+    subtitle: 'Create a new container for cards',
+    initial: ''
+  });
   if (name === null) return;
   const trimmed = name.trim(); if (!trimmed) return;
   const order = state.categories.length;
