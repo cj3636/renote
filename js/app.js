@@ -20,6 +20,7 @@ const modal = document.getElementById('modal');
 const backdrop = modal?.querySelector('.backdrop');
 const nameInput = document.getElementById('nameInput');
 const categorySelect = document.getElementById('categorySelect');
+const searchInput = document.getElementById('searchInput');
 const editor = document.getElementById('editor');
 const closeModalBtn = document.getElementById('closeModal');
 const trashBtn = document.getElementById('trashBtn');
@@ -32,6 +33,10 @@ const categorySubtitleEl = categoryModal?.querySelector('[data-role="subtitle"]'
 const confirmModal = document.getElementById('confirmModal');
 const confirmTitleEl = confirmModal?.querySelector('[data-role="confirm-title"]');
 const confirmSubtitleEl = confirmModal?.querySelector('[data-role="confirm-subtitle"]');
+
+let collapsedCategories = new Set(store.get('collapsed_categories', []));
+let searchTerm = (store.get('search_term', '') || '').toLowerCase();
+if (searchInput) searchInput.value = searchTerm;
 const confirmBodyEl = confirmModal?.querySelector('[data-role="confirm-body"]');
 const confirmAcceptBtn = confirmModal?.querySelector('[data-role="confirm-accept"]');
 
@@ -63,7 +68,15 @@ const categoriesList = () => {
   const cats = [...(state.categories||[])].sort((a,b)=>a.order-b.order);
   return [{id:ROOT_CATEGORY, name:'Uncategorized', order:-1, system:true}, ...cats];
 };
-const cardsInCategory = (catId) => state.cards.filter(c=>normalizeCategory(c.category_id)===normalizeCategory(catId)).sort((a,b)=>a.order-b.order);
+const matchesSearch = (card) => {
+  if (!searchTerm) return true;
+  const hay = ((card.name||'') + ' ' + (card.text||'')).toLowerCase();
+  return hay.includes(searchTerm);
+};
+const cardsInCategoryRaw = (catId) => state.cards
+  .filter(c=>normalizeCategory(c.category_id)===normalizeCategory(catId))
+  .sort((a,b)=>a.order-b.order);
+const cardsInCategory = (catId) => cardsInCategoryRaw(catId).filter(matchesSearch);
 const nextOrderForCategory = (catId) => {
   const list = cardsInCategory(catId);
   if (!list.length) return 0;
@@ -321,6 +334,18 @@ function renderCategory(cat) {
   const title = document.createElement('div');
   title.className = 'category-title';
   title.textContent = (cat.name || '').trim() || (cat.id === ROOT_CATEGORY ? 'Uncategorized' : '-');
+
+  const toggle = document.createElement('button');
+  toggle.className = 'category-toggle';
+  const collapsed = collapsedCategories.has(cat.id);
+  toggle.textContent = collapsed ? '▸' : '▾';
+  toggle.title = collapsed ? 'Expand category' : 'Collapse category';
+  toggle.addEventListener('click', ()=>{
+    if (collapsedCategories.has(cat.id)) collapsedCategories.delete(cat.id); else collapsedCategories.add(cat.id);
+    store.set('collapsed_categories', Array.from(collapsedCategories));
+    render();
+  });
+  header.appendChild(toggle);
   header.appendChild(title);
 
   const actions = document.createElement('div');
@@ -368,15 +393,29 @@ function renderCategory(cat) {
   const subGrid = document.createElement('div');
   subGrid.className = 'grid subgrid';
   subGrid.dataset.categoryId = cat.id;
-  section.appendChild(subGrid);
+  if (!collapsed) {
+    section.appendChild(subGrid);
+    renderCategoryCards(cat.id, subGrid);
+  } else {
+    section.appendChild(subGrid);
+    subGrid.style.display = 'none';
+  }
+  section.classList.toggle('collapsed', collapsed);
   grid.appendChild(section);
-
-  renderCategoryCards(cat.id, subGrid);
 }
+
 
 function renderCategoryCards(catId, subGrid) {
   subGrid.innerHTML = '';
   const cards = cardsInCategory(catId);
+  if (!cards.length) {
+    const empty = document.createElement('div');
+    empty.className = 'muted';
+    empty.style.padding = '8px 12px 16px';
+    empty.textContent = searchTerm ? 'No matches' : 'No cards yet';
+    subGrid.appendChild(empty);
+    return;
+  }
   cards.forEach(card => {
     const el = document.createElement('div');
     el.className = 'card';
@@ -575,6 +614,12 @@ addCategoryBtn?.addEventListener('click', async ()=>{
       alert(res.error || 'Create failed');
     }
   } catch { alert('Create failed'); }
+});
+
+searchInput?.addEventListener('input', ()=>{
+  searchTerm = (searchInput.value || '').toLowerCase();
+  store.set('search_term', searchTerm);
+  render();
 });
 
 function queueServerSave(card) {

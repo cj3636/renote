@@ -115,6 +115,17 @@ body {
 	font-weight: 700;
 	letter-spacing: 0.5px;
 }
+.category-toggle {
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	background: var(--panel-alt);
+	color: var(--text-dim);
+	padding: 4px 8px;
+	cursor: pointer;
+}
+.category-section.collapsed .subgrid { display: none; }
+.category-section.collapsed .category-toggle { background: var(--panel); color: var(--text); }
+.category-section.collapsed { opacity: 0.82; }
 .category-actions {
 	display: flex;
 	align-items: center;
@@ -130,6 +141,14 @@ body {
 	color: var(--text);
 	border-radius: var(--radius-sm);
 	padding: 6px 10px;
+}
+.search-input {
+	min-width: 200px;
+	background: var(--panel);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	padding: 8px 10px;
+	color: var(--text);
 }
 
 .card {
