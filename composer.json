@@ -37,5 +37,14 @@
     "lint": "php -l index.php src/Api/index.php src/Support/Bootstrap.php bin/flush.php",
     "format": "php-cs-fixer fix --using-cache=no --verbose",
     "cs": "phpcs --standard=PSR12 -q --colors ."
+  },
+  "extra": {
+    "ci": {
+      "steps": [
+        "composer install --no-interaction --prefer-dist",
+        "php -l index.php src/Api/index.php src/Support/Bootstrap.php bin/flush.php",
+        "vendor/bin/phpunit --colors=always"
+      ]
+    }
   }
 }
