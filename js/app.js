@@ -49,6 +49,12 @@ let versionsState = { cardId:null, versions:[], selected:null };
 
 const flushBtn = document.getElementById('flushBtn');
 
+const isCoarsePointer = window.matchMedia('(pointer: coarse)').matches;
+if (isCoarsePointer) {
+  document.body.classList.add('coarse-pointer');
+  grid?.setAttribute('data-mobile-dnd-disabled', '');
+}
+
 const API = {
   state: () => fetch('src/Api/index.php?action=state').then(r=>r.json()),
   saveCard: (card) => fetch('src/Api/index.php?action=save_card', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(card)}).then(r=>r.json()),
@@ -78,16 +84,33 @@ const cardsInCategoryRaw = (catId) => state.cards
   .sort((a,b)=>a.order-b.order);
 const cardsInCategory = (catId) => cardsInCategoryRaw(catId).filter(matchesSearch);
 const nextOrderForCategory = (catId) => {
-  const list = cardsInCategory(catId);
+  const list = cardsInCategoryRaw(catId);
   if (!list.length) return 0;
   return Math.max(...list.map(c=>c.order|0)) + 1;
 };
 const resequenceCategory = (catId) => {
-  const list = cardsInCategory(catId);
+  const list = cardsInCategoryRaw(catId);
   list.forEach((c,i)=>{ c.order=i; });
 };
 const resequenceCategories = () => {
   state.categories.sort((a,b)=>a.order-b.order).forEach((c,i)=>{ c.order=i; });
+};
+const persistCategoryOrders = (catId) => {
+  const payload = cardsInCategoryRaw(catId).map(c=>({
+    id: c.id,
+    text: c.text,
+    order: c.order,
+    name: c.name || '',
+    category_id: c.category_id || ROOT_CATEGORY
+  }));
+  try {
+    fetch('src/Api/index.php?action=bulk_save', {
+      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({cards: payload})
+    });
+  } catch {}
+};
+const resetDragMeta = () => {
+  dragMeta = { dragging:null, id:null, startIndex:-1, placeholder:null, active:false, committed:false, catId:null, container:null, currentCatId:null, currentContainer:null };
 };
 
 const uid = () => crypto.randomUUID?.() || (Date.now().toString(36)+Math.random().toString(36).slice(2));
@@ -132,8 +155,13 @@ let dragMeta = {
   startIndex: -1,
   placeholder: null,
   active: false,
-  committed: false
+  committed: false,
+  catId: null,
+  container: null,
+  currentCatId: null,
+  currentContainer: null
 };
+let categoryDragMeta = { active:false, section:null, placeholder:null };
 
 function addCard(catId = ROOT_CATEGORY) {
   const categoryId = normalizeCategory(catId);
@@ -156,6 +184,8 @@ function moveCardToCategory(card, newCategoryId) {
   resequenceCategory(target);
   saveLocal();
   queueServerSave(card);
+  persistCategoryOrders(target);
+  if (target !== prev) persistCategoryOrders(prev);
   render();
   ensureCategorySelectOptions(target);
 }
@@ -232,6 +262,12 @@ function makePlaceholder(height=0) {
   const ph = document.createElement('div');
   ph.className = 'card-placeholder';
   ph.style.height = height ? height+ 'px' : '';
+  return ph;
+}
+function makeCategoryPlaceholder(height=0) {
+  const ph = document.createElement('div');
+  ph.className = 'category-placeholder category-section';
+  ph.style.height = height ? height + 'px' : '';
   return ph;
 }
 
@@ -331,9 +367,21 @@ function renderCategory(cat) {
 
   const header = document.createElement('div');
   header.className = 'category-header';
-  const title = document.createElement('div');
-  title.className = 'category-title';
-  title.textContent = (cat.name || '').trim() || (cat.id === ROOT_CATEGORY ? 'Uncategorized' : '-');
+  const heading = document.createElement('div');
+  heading.className = 'category-heading';
+  if (cat.id !== ROOT_CATEGORY) {
+    const dragHandle = document.createElement('button');
+    dragHandle.className = 'icon-btn category-drag-handle';
+    dragHandle.title = isCoarsePointer ? 'Drag categories from desktop; mobile coming soon' : 'Drag to reorder category';
+    dragHandle.textContent = '⇅';
+    heading.appendChild(dragHandle);
+    attachCategoryDrag(section, dragHandle);
+  } else {
+    const spacer = document.createElement('div');
+    spacer.style.width = '34px';
+    spacer.setAttribute('aria-hidden', 'true');
+    heading.appendChild(spacer);
+  }
 
   const toggle = document.createElement('button');
   toggle.className = 'category-toggle';
@@ -345,8 +393,23 @@ function renderCategory(cat) {
     store.set('collapsed_categories', Array.from(collapsedCategories));
     render();
   });
-  header.appendChild(toggle);
-  header.appendChild(title);
+  heading.appendChild(toggle);
+
+  const title = document.createElement('div');
+  title.className = 'category-title';
+  title.textContent = (cat.name || '').trim() || (cat.id === ROOT_CATEGORY ? 'Uncategorized' : '-');
+  heading.appendChild(title);
+
+  const meta = document.createElement('div');
+  meta.className = 'category-meta';
+  const cardCount = cardsInCategoryRaw(cat.id).length;
+  const badge = document.createElement('span');
+  badge.className = 'category-badge';
+  badge.textContent = `${cardCount} card${cardCount === 1 ? '' : 's'}`;
+  meta.appendChild(badge);
+  heading.appendChild(meta);
+
+  header.appendChild(heading);
 
   const actions = document.createElement('div');
   actions.className = 'category-actions';
@@ -391,7 +454,7 @@ function renderCategory(cat) {
 
   section.appendChild(header);
   const subGrid = document.createElement('div');
-  subGrid.className = 'grid subgrid';
+  subGrid.className = 'grid cards-grid subgrid';
   subGrid.dataset.categoryId = cat.id;
   if (!collapsed) {
     section.appendChild(subGrid);
@@ -407,6 +470,7 @@ function renderCategory(cat) {
 
 function renderCategoryCards(catId, subGrid) {
   subGrid.innerHTML = '';
+  registerCardContainer(subGrid, catId);
   const cards = cardsInCategory(catId);
   if (!cards.length) {
     const empty = document.createElement('div');
@@ -448,8 +512,18 @@ function renderCategoryCards(catId, subGrid) {
   });
 }
 
-// Simplified drag/drop per category grid
+function registerCardContainer(container, catId) {
+  container.addEventListener('dragover', (e)=> handleCardDragOver(e, catId, container));
+  container.addEventListener('drop', (e)=> { if (dragMeta.active) e.preventDefault(); });
+}
+
+// Simplified drag/drop per category grid (desktop)
 function attachCardDrag(cardEl, grabEl, catId, container) {
+  if (isCoarsePointer) {
+    grabEl.title = 'Drag on desktop; mobile movement coming soon';
+    grabEl.removeAttribute('draggable');
+    return;
+  }
   grabEl.setAttribute('draggable', 'true');
   grabEl.addEventListener('dragstart', (e)=> {
     dragMeta = {
@@ -461,54 +535,120 @@ function attachCardDrag(cardEl, grabEl, catId, container) {
       committed: false,
       catId,
       container,
+      currentCatId: catId,
+      currentContainer: container
     };
     cardEl.classList.add('dragging');
     container.insertBefore(dragMeta.placeholder, cardEl.nextSibling);
     e.dataTransfer.effectAllowed = 'move';
     try { e.dataTransfer.setData('text/plain', dragMeta.id); } catch {}
   });
-  grabEl.addEventListener('dragend', ()=> finalizeDrag(catId, container));
-  container.addEventListener('dragover', (e)=> {
-    if (!dragMeta.active || dragMeta.catId !== catId) return;
-    e.preventDefault();
-    const ph = dragMeta.placeholder;
-    if (!ph) return;
-    const target = e.target.closest('.card');
-    if (!target || target === ph || target === dragMeta.dragging) {
-      if (ph.parentNode !== container) container.appendChild(ph);
-      return;
-    }
-    container.insertBefore(ph, target);
-  });
+  grabEl.addEventListener('dragend', finalizeCardDrag);
 }
 
-function finalizeDrag(catId, container) {
-  if (!dragMeta.active || dragMeta.catId !== catId) { dragMeta = { dragging:null, id:null, startIndex:-1, placeholder:null, active:false, committed:false }; return; }
+function handleCardDragOver(e, catId, container) {
+  if (!dragMeta.active) return;
+  e.preventDefault();
   const ph = dragMeta.placeholder;
+  if (!ph) return;
+  dragMeta.currentCatId = catId;
+  dragMeta.currentContainer = container;
+  const target = e.target.closest('.card');
+  if (!target || target === ph || target === dragMeta.dragging) {
+    if (ph.parentNode !== container) container.appendChild(ph);
+    return;
+  }
+  container.insertBefore(ph, target);
+}
+
+function finalizeCardDrag() {
+  if (!dragMeta.active) { resetDragMeta(); return; }
+  const ph = dragMeta.placeholder;
+  const targetContainer = dragMeta.currentContainer || dragMeta.container;
+  const targetCatId = dragMeta.currentCatId || dragMeta.catId;
   const movedEl = dragMeta.dragging;
-  if (ph && container.contains(ph) && movedEl) {
-    container.insertBefore(movedEl, ph);
+  if (ph && targetContainer && movedEl) {
+    targetContainer.insertBefore(movedEl, ph);
   }
   ph?.remove();
-  const ids = [...container.querySelectorAll('.card')].map(c=>c.dataset.id);
+  if (!movedEl || !targetContainer) { resetDragMeta(); render(); return; }
   const nowSec = Date.now()/1000|0;
-  const catCards = cardsInCategory(catId);
-  const byId = Object.fromEntries(catCards.map(c=>[c.id,c]));
-  ids.forEach((id,i)=>{ const c = byId[id]; if (c) { c.order=i; c.updated_at=nowSec; } });
+  const targetIds = [...targetContainer.querySelectorAll('.card')].map(c=>c.dataset.id);
+  const targetCards = cardsInCategoryRaw(targetCatId);
+  const targetById = Object.fromEntries(targetCards.map(c=>[c.id,c]));
+  targetIds.forEach((id,i)=>{ const c = targetById[id]; if (c) { c.order=i; c.updated_at=nowSec; c.category_id = targetCatId; } });
+  if (targetCatId !== dragMeta.catId) {
+    const sourceIds = [...(dragMeta.container?.querySelectorAll('.card')||[])].map(c=>c.dataset.id);
+    const sourceCards = cardsInCategoryRaw(dragMeta.catId);
+    const sourceById = Object.fromEntries(sourceCards.map(c=>[c.id,c]));
+    sourceIds.forEach((id,i)=>{ const c = sourceById[id]; if (c) { c.order=i; c.updated_at=nowSec; } });
+  }
   saveLocal();
-  // Persist order for this category explicitly
-  try {
-    fetch('src/Api/index.php?action=bulk_save', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({cards: catCards.map(c=>({id:c.id, text:c.text, order:c.order, name:c.name||'', category_id:c.category_id||ROOT_CATEGORY}))}) });
-  } catch {}
-  dragMeta = { dragging:null, id:null, startIndex:-1, placeholder:null, active:false, committed:false };
+  persistCategoryOrders(targetCatId);
+  if (targetCatId !== dragMeta.catId) persistCategoryOrders(dragMeta.catId);
+  resetDragMeta();
+  render();
 }
+
+function attachCategoryDrag(section, handle) {
+  if (!handle || isCoarsePointer) { if (handle) handle.disabled = true; return; }
+  handle.setAttribute('draggable', 'true');
+  handle.addEventListener('dragstart', (e)=> {
+    categoryDragMeta = { active:true, section, placeholder: makeCategoryPlaceholder(section.getBoundingClientRect().height) };
+    section.classList.add('dragging');
+    grid.insertBefore(categoryDragMeta.placeholder, section.nextSibling);
+    e.dataTransfer.effectAllowed = 'move';
+  });
+  handle.addEventListener('dragend', finalizeCategoryDrag);
+}
+
+function handleCategoryDragOver(e) {
+  if (!categoryDragMeta.active) return;
+  e.preventDefault();
+  const ph = categoryDragMeta.placeholder;
+  if (!ph) return;
+  const targetSection = e.target.closest('.category-section');
+  if (!targetSection || targetSection === ph || targetSection === categoryDragMeta.section) return;
+  grid.insertBefore(ph, targetSection);
+}
+
+function finalizeCategoryDrag() {
+  if (!categoryDragMeta.active) return;
+  const { placeholder: ph, section } = categoryDragMeta;
+  if (ph && grid.contains(ph) && section) {
+    grid.insertBefore(section, ph);
+  }
+  ph?.remove();
+  section?.classList.remove('dragging');
+  const nowSec = Date.now()/1000|0;
+  const ids = [...grid.querySelectorAll('.category-section')]
+    .map(s=>s.dataset.categoryId)
+    .filter(id=>id && id !== ROOT_CATEGORY);
+  ids.forEach((id,i)=>{ const c = state.categories.find(cat=>cat.id===id); if (c) { c.order=i; c.updated_at=nowSec; } });
+  saveLocal();
+  try { state.categories.forEach(c=> API.saveCategory({id:c.id, name:c.name, order:c.order})); } catch {}
+  categoryDragMeta = { active:false, section:null, placeholder:null };
+  render();
+}
+
+grid?.addEventListener('dragover', handleCategoryDragOver);
+grid?.addEventListener('drop', (e)=> { if (categoryDragMeta.active) e.preventDefault(); });
 
 // Cancel if ESC pressed during drag
 document.addEventListener('keydown', (e)=>{
-  if (e.key==='Escape' && dragMeta.active) {
-    dragMeta.placeholder?.remove();
-    dragMeta = { dragging:null, id:null, startIndex:-1, placeholder:null, active:false, committed:false };
-    render(); // restore canonical order
+  if (e.key==='Escape') {
+    let rerender = false;
+    if (dragMeta.active) {
+      dragMeta.placeholder?.remove();
+      resetDragMeta();
+      rerender = true;
+    }
+    if (categoryDragMeta.active) {
+      categoryDragMeta.placeholder?.remove();
+      categoryDragMeta = { active:false, section:null, placeholder:null };
+      rerender = true;
+    }
+    if (rerender) render();
   }
 });
 // ===== Modal =====

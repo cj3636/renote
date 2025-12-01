@@ -36,7 +36,7 @@ header("Content-Security-Policy: default-src 'none'; script-src 'self' 'nonce-$c
 </script>
 <div id="app">
   <?php echo file_get_contents(__DIR__ . '/inc/header.html'); ?>
-  <main class="grid" id="grid" aria-live="polite" aria-busy="false"></main>
+  <main class="grid category-grid" id="grid" aria-live="polite" aria-busy="false"></main>
 </div>
 <?php echo file_get_contents(__DIR__ . '/inc/modal.html'); ?>
 <script src="js/store.js"></script>
