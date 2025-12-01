@@ -101,6 +101,39 @@ switch ($action) {
             'seconds_since_last_flush' => $sinceFlush
         ]);
         break;
+    case 'status':
+        rl_check('status');
+        $r = redis_client();
+        $redisOk = true; $redisInfo = null;
+        try { $redisInfo = $r->info(); } catch (Throwable $e) { $redisOk = false; }
+        $dbOk = true;
+        try { db()->query("SELECT 1"); } catch (Throwable $e) { $dbOk = false; }
+        $streamLen = 0; try { $streamLen = (int)$r->xlen(REDIS_STREAM); } catch (Throwable $e) {}
+        $lastId = $r->get(REDIS_STREAM_LAST) ?: '0-0';
+        $lag = 0;
+        try {
+            $cursor = '(' . $lastId;
+            $pending = 0; $chunk = 200;
+            while (true) {
+                $slice = $r->executeRaw(['XRANGE', REDIS_STREAM, $cursor, '+', 'COUNT', (string)$chunk]);
+                if (!$slice) break;
+                $pending += count($slice);
+                if (count($slice) < $chunk || $pending >= 2000) break;
+                $cursor = '(' . $slice[count($slice)-1][0];
+            }
+            $lag = $pending;
+        } catch (Throwable $e) {}
+        ok([
+            'redis_ok' => $redisOk,
+            'db_ok' => $dbOk,
+            'stream_length' => $streamLen,
+            'stream_lag_estimate' => $lag,
+            'last_flushed_id' => $lastId,
+            'categories' => [
+                'count' => count($r->zrange(REDIS_CATEGORIES_INDEX, 0, -1) ?: []),
+            ],
+        ]);
+        break;
     case 'save_category':
         rl_check('save_category');
         $in = json_input();

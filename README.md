@@ -93,6 +93,8 @@ CREATE TABLE IF NOT EXISTS categories (
   `order`    INT NOT NULL DEFAULT 0,
   updated_at BIGINT NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+API also provides a lightweight `status` action (Redis/DB reachability, stream lag, category count) for monitoring.
 ```
 
 1. Run a PHP dev server (or use Apache/Nginx):

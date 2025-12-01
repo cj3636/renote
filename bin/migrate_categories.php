@@ -47,4 +47,6 @@ function migrate_categories(): void {
     echo "Migration complete.\n";
 }
 
-migrate_categories();
+if (PHP_SAPI === 'cli' && realpath($_SERVER['SCRIPT_FILENAME']) === __FILE__) {
+    migrate_categories();
+}

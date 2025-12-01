@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+      mariadb:
+        image: mariadb:10.5
+        env:
+          MARIADB_ALLOW_EMPTY_ROOT_PASSWORD: "yes"
+          MARIADB_DATABASE: pnotes
+          MARIADB_USER: pnoteuser
+          MARIADB_PASSWORD: ""
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: pdo, pdo_mysql, mbstring
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist
+      - name: Lint
+        run: php -l index.php src/Api/index.php src/Support/Bootstrap.php bin/flush.php
+      - name: PHPUnit
+        env:
+          DB_HOST: 127.0.0.1
+          DB_PORT: 3306
+          DB_NAME: pnotes
+          DB_USER: pnoteuser
+          DB_PASS: ""
+          REDIS_CONNECTION: tcp
+          REDIS_HOST: 127.0.0.1
+          REDIS_PORT: 6379
+          APP_WRITE_BEHIND: false
+        run: vendor/bin/phpunit --colors=always
