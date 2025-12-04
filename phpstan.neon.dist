@@ -9,5 +9,7 @@ parameters:
     - legacy
   ignoreErrors:
     - '#Undefined variable: stats#'
+  stubFiles:
+    - _ide_helper.php
   checkMissingIterableValueType: false
   reportUnmatchedIgnoredErrors: true
