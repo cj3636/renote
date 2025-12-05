@@ -49,6 +49,14 @@ let versionsState = { cardId:null, versions:[], selected:null };
 
 const flushBtn = document.getElementById('flushBtn');
 
+const CATEGORY_LAYOUTS = { HORIZONTAL:'horizontal', STACKED:'stacked' };
+const applyCategoryLayout = (mode) => {
+  const safeMode = mode === CATEGORY_LAYOUTS.STACKED ? CATEGORY_LAYOUTS.STACKED : CATEGORY_LAYOUTS.HORIZONTAL;
+  grid?.setAttribute('data-layout', safeMode);
+  try { store.set('category_layout_mode', safeMode); } catch {}
+};
+applyCategoryLayout(store.get('category_layout_mode', CATEGORY_LAYOUTS.HORIZONTAL));
+
 const isCoarsePointer = window.matchMedia('(pointer: coarse)').matches;
 if (isCoarsePointer) {
   document.body.classList.add('coarse-pointer');

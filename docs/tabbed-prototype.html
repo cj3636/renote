@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Tabbed Categories Prototype</title>
+  <style>
+    :root {
+      --bg: #0b0f14;
+      --panel: #101725;
+      --border: #1f2a3d;
+      --accent: #7aa2ff;
+      --text: #eaeef5;
+      --muted: #93a4c0;
+      --card: #131c2c;
+      --warn: #ffb347;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.6 "Segoe UI", system-ui, -apple-system, sans-serif; }
+    header { padding: 16px 20px 8px; }
+    h1 { margin: 0 0 6px; font-size: 18px; letter-spacing: 0.3px; }
+    p { margin: 4px 0 10px; color: var(--muted); }
+    .controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    button { border: 1px solid var(--border); background: var(--panel); color: var(--text); padding: 8px 12px; border-radius: 10px; cursor: pointer; font-weight: 600; letter-spacing: 0.2px; }
+    button:disabled { opacity: 0.45; cursor: not-allowed; }
+    .pill { border-radius: 999px; padding: 6px 10px; border: 1px solid var(--border); color: var(--muted); background: rgba(255,255,255,0.03); }
+    .tab-bar { display: flex; gap: 8px; flex-wrap: wrap; padding: 8px 20px; }
+    .tab { border: 1px solid var(--border); background: var(--panel); color: var(--text); padding: 8px 12px; border-radius: 12px; cursor: pointer; transition: border-color 0.15s ease, background 0.15s ease; }
+    .tab.active { background: var(--accent); color: #0b0f14; border-color: var(--accent); }
+    .columns { display: grid; gap: 12px; padding: 12px 20px 22px; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+    .column { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 12px; min-width: 320px; box-shadow: 0 8px 24px rgba(0,0,0,0.25); }
+    .column-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+    .column-title { font-weight: 800; letter-spacing: 0.4px; }
+    .badge { background: rgba(255,255,255,0.06); border: 1px solid var(--border); border-radius: 999px; padding: 4px 10px; color: var(--muted); font-size: 12px; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 10px; margin-bottom: 10px; }
+    .card-head { display: flex; align-items: center; gap: 8px; justify-content: space-between; color: var(--muted); font-size: 13px; }
+    .card-title { font-weight: 700; color: var(--text); }
+    .controls-bar { display: flex; gap: 6px; align-items: center; }
+    .control { padding: 4px 8px; border: 1px solid var(--border); border-radius: 8px; background: rgba(255,255,255,0.03); color: var(--muted); font-size: 12px; }
+    .card-body { margin-top: 6px; color: var(--text); font-size: 14px; line-height: 1.4; }
+    .status { color: var(--muted); font-size: 13px; }
+    .warning { color: var(--warn); font-weight: 700; }
+    @media (max-width: 640px) {
+      .columns { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+      .column { min-width: 260px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Tabbed Categories Prototype</h1>
+    <div class="controls">
+      <button id="addColumn">Add split</button>
+      <button id="removeColumn">Remove split</button>
+      <span id="status" class="status"></span>
+      <span class="pill">Min column width: <span id="minWidth">320</span>px</span>
+    </div>
+    <p>Click tabs to pin categories as columns. Add splits until columns would shrink below the control bar width.</p>
+  </header>
+  <div id="tabBar" class="tab-bar"></div>
+  <div id="columns" class="columns"></div>
+
+  <script>
+    const categories = [
+      { id: 'inbox', name: 'Inbox', cards: [
+        { title: 'Welcome', text: 'This is a quick preview of how a card header and body fit in the tabbed view.' },
+        { title: 'Follow up', text: 'Use the tabs to pin a category and split horizontally when there is room.' }
+      ]},
+      { id: 'today', name: 'Today', cards: [
+        { title: 'Ship fixes', text: 'Desktop layout returns to horizontal lanes.' },
+        { title: 'Prototype tabs', text: 'Build toward multi-column tabs with a split button.' }
+      ]},
+      { id: 'ideas', name: 'Ideas', cards: [
+        { title: 'Quick capture', text: 'Cards keep a compact control bar with drag, move, delete icons.' },
+        { title: 'Explore split UX', text: 'Try 2 or 3 columns, then collapse back to tabs only.' }
+      ]},
+      { id: 'research', name: 'Research', cards: [
+        { title: 'References', text: 'Wide columns show full control bar; narrow columns collapse first.' },
+        { title: 'Notes', text: 'Reduce splits when the header would wrap.' }
+      ]}
+    ];
+
+    const minColumnWidth = 320;
+    const columnsEl = document.getElementById('columns');
+    const tabBarEl = document.getElementById('tabBar');
+    const statusEl = document.getElementById('status');
+    const addBtn = document.getElementById('addColumn');
+    const removeBtn = document.getElementById('removeColumn');
+    document.getElementById('minWidth').textContent = minColumnWidth;
+
+    let active = ['inbox', 'today'];
+
+    const getMaxColumns = () => {
+      const width = columnsEl.clientWidth || window.innerWidth;
+      return Math.max(1, Math.floor(width / minColumnWidth));
+    };
+
+    const setStatus = (warning = '') => {
+      const max = getMaxColumns();
+      statusEl.textContent = warning || `Showing ${active.length} of ${max} allowed columns at current width.`;
+      addBtn.disabled = active.length >= Math.min(max, categories.length);
+      removeBtn.disabled = active.length <= 1;
+      statusEl.classList.toggle('warning', Boolean(warning));
+    };
+
+    const renderTabs = () => {
+      tabBarEl.innerHTML = '';
+      const max = getMaxColumns();
+      categories.forEach(cat => {
+        const btn = document.createElement('button');
+        btn.className = 'tab' + (active.includes(cat.id) ? ' active' : '');
+        btn.textContent = cat.name;
+        btn.addEventListener('click', () => {
+          if (active.includes(cat.id)) {
+            if (active.length === 1) return;
+            active = active.filter(id => id !== cat.id);
+          } else {
+            if (active.length >= max) {
+              setStatus(`Cannot add another tab; width only supports ${max}.`);
+              return;
+            }
+            active.push(cat.id);
+          }
+          renderColumns();
+          renderTabs();
+        });
+        tabBarEl.appendChild(btn);
+      });
+    };
+
+    const renderColumns = () => {
+      const max = getMaxColumns();
+      if (active.length > max) active = active.slice(0, max);
+      columnsEl.innerHTML = '';
+      active.forEach(id => {
+        const cat = categories.find(c => c.id === id);
+        if (!cat) return;
+        const col = document.createElement('div');
+        col.className = 'column';
+        col.innerHTML = `
+          <div class="column-head">
+            <div class="column-title">${cat.name}</div>
+            <span class="badge">${cat.cards.length} cards</span>
+          </div>
+        `;
+        cat.cards.forEach(card => {
+          const cardEl = document.createElement('div');
+          cardEl.className = 'card';
+          cardEl.innerHTML = `
+            <div class="card-head">
+              <span class="card-title">${card.title}</span>
+              <div class="controls-bar">
+                <span class="control">drag</span>
+                <span class="control">move</span>
+                <span class="control">del</span>
+              </div>
+            </div>
+            <div class="card-body">${card.text}</div>
+          `;
+          col.appendChild(cardEl);
+        });
+        columnsEl.appendChild(col);
+      });
+      setStatus();
+    };
+
+    addBtn.addEventListener('click', () => {
+      const max = getMaxColumns();
+      if (active.length >= max) {
+        setStatus(`Cannot add another tab; width only supports ${max}.`);
+        return;
+      }
+      const next = categories.find(cat => !active.includes(cat.id));
+      if (next) active.push(next.id);
+      renderColumns();
+      renderTabs();
+    });
+
+    removeBtn.addEventListener('click', () => {
+      if (active.length <= 1) return;
+      active.pop();
+      renderColumns();
+      renderTabs();
+    });
+
+    window.addEventListener('resize', () => {
+      renderColumns();
+      renderTabs();
+    });
+
+    renderColumns();
+    renderTabs();
+  </script>
+</body>
+</html>
