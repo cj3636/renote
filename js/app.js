@@ -1132,7 +1132,7 @@ drawer?.addEventListener('click', (e) => {
 });
 
 async function loadVersions(cardId) {
-    if (!cardId) return; versionsState.cardId = cardId; const listEl = versionsPanel.querySelector('#versionsList'); listEl.textContent = 'Loading versionsâ€¦';
+    if (!cardId) return; versionsState.cardId = cardId; const listEl = versionsPanel.querySelector('#versionsList'); listEl.textContent = 'Loading versions…';
     try {
         const res = await fetch(`src/Api/index.php?action=versions_list&id=${encodeURIComponent(cardId)}&limit=25`);
         const j = await res.json(); if (!j.ok) throw new Error(j.error || 'fail');
@@ -1150,7 +1150,7 @@ async function loadVersions(cardId) {
 }
 
 async function showVersionDiff(versionId) {
-    const diffEl = versionsPanel.querySelector('#versionDiff'); diffEl.textContent = 'Loadingâ€¦';
+    const diffEl = versionsPanel.querySelector('#versionDiff'); diffEl.textContent = 'Loading…';
     try {
         const res = await fetch(`src/Api/index.php?action=version_get&version_id=${versionId}`);
         const j = await res.json(); if (!j.ok) throw new Error(j.error || 'fail');
