@@ -862,12 +862,6 @@ function closeModal() {
 }
 backdrop?.addEventListener('click', (e) => { if (e.target.dataset.close) closeModal(); });
 closeModalBtn?.addEventListener('click', closeModal);
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
-
-fullscreenBtn?.addEventListener('click', () => {
-    editor.classList.toggle('fullscreen');
-    fullscreenBtn.textContent = editor.classList.contains('fullscreen') ? ICONS.FULLSCREEN_EXIT : ICONS.FULLSCREEN_ENTER;
-});
 
 // Save text on input
 editor?.addEventListener('input', () => {
@@ -910,7 +904,7 @@ function saveLocal() { store.set('cards_state', state); }
 window.addEventListener('beforeunload', () => { try { API.bulkSave(state.cards); } catch { } });
 
 // ===== History drawer =====
-historyBtn?.addEventListener('click', async () => {
+async function openHistoryDrawer() {
     try {
         const { orphans = [] } = await API.history();
         historyList.innerHTML = '';
@@ -982,14 +976,7 @@ historyBtn?.addEventListener('click', async () => {
             if (sel && sel.options.length && !sel.value) { sel.value = sel.options[0].value; loadVersions(sel.value); }
         }
     } catch { alert('History load failed'); }
-});
-closeHistory?.addEventListener('click', () => { drawer.classList.add('hidden'); drawer.setAttribute('aria-hidden', 'true'); });
-// Backdrop outside click to close (history drawer)
-drawer?.addEventListener('click', (e) => {
-    if (e.target && e.target.classList.contains('drawer-backdrop')) {
-        drawer.classList.add('hidden'); drawer.setAttribute('aria-hidden', 'true');
-    }
-});
+}
 
 async function loadVersions(cardId) {
     if (!cardId) return; versionsState.cardId = cardId; const listEl = versionsPanel.querySelector('#versionsList'); listEl.textContent = 'Loading versions…';

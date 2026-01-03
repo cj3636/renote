@@ -187,3 +187,40 @@ flushBtn?.addEventListener('click', async () => {
     } catch (e) { alert('Flush failed'); }
     flushBtn.disabled = false;
 });
+
+// Modal bindings
+const modal = document.getElementById('modal');
+const backdrop = modal?.querySelector('.backdrop');
+const closeModalBtn = document.getElementById('closeModal');
+const fullscreenBtn = document.getElementById('fullscreenBtn');
+const editor = document.getElementById('editor');
+backdrop?.addEventListener('click', (e) => { if (e.target.dataset.close && typeof closeModal === 'function') closeModal(); });
+closeModalBtn?.addEventListener('click', () => { if (typeof closeModal === 'function') closeModal(); });
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && modal && !modal.classList.contains('hidden') && typeof closeModal === 'function') closeModal();
+});
+fullscreenBtn?.addEventListener('click', () => {
+    if (!editor) return;
+    editor.classList.toggle('fullscreen');
+    if (fullscreenBtn && window.ICONS) {
+        fullscreenBtn.textContent = editor.classList.contains('fullscreen') ? window.ICONS.FULLSCREEN_EXIT : window.ICONS.FULLSCREEN_ENTER;
+    }
+});
+
+// History drawer bindings
+const historyBtn = document.getElementById('historyBtn');
+const drawer = document.getElementById('historyDrawer');
+const closeHistory = document.getElementById('closeHistory');
+const historyList = document.getElementById('historyList');
+const hideHistoryDrawer = () => {
+    if (!drawer) return;
+    drawer.classList.add('hidden');
+    drawer.setAttribute('aria-hidden', 'true');
+};
+historyBtn?.addEventListener('click', () => {
+    if (typeof openHistoryDrawer === 'function') openHistoryDrawer();
+});
+closeHistory?.addEventListener('click', hideHistoryDrawer);
+drawer?.addEventListener('click', (e) => {
+    if (e.target && e.target.classList.contains('drawer-backdrop')) hideHistoryDrawer();
+});

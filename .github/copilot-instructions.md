@@ -16,7 +16,8 @@ Purpose: Enable an automated AI agent to make SMALL & SAFE changes. This is a co
 
 ## 2. System Overview
 
-- **Frontend:** Vanilla JS (`index.php`, `js/app.js`, `js/store.js`), localStorage cache.
+- **Frontend:** Vanilla JS (non-module): load order `store.js` → `icons.js` (sets `window.ICONS`) → `app.js` (state/API + render helpers) → `ui.js` (DOM/event wiring), localStorage cache.
+  - `js/icons.js`: central icon constants; extend by adding to `window.ICONS` (no imports/modules).
 - **Backend:** Single action switch: `src/Api/index.php`.
 - **Redis Hot State:** Hash `card:<id>`; ZSETs: `cards:index`, `categories:index`, `cat:<id>:cards`; Stream `cards:stream`.
 - **MariaDB Durable State:** Tables `cards`, `categories` populated by worker only (unless write-behind disabled).

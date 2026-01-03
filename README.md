@@ -54,6 +54,11 @@
 - Stream trimming to prevent unbounded growth
 - Categories with nested card grids; categories cannot be deleted while non-empty
 
+### Frontend Notes
+
+- Plain `<script>` loading order: `js/store.js` → `js/icons.js` (defines `window.ICONS`) → `js/app.js` (state, API, render helpers) → `js/ui.js` (DOM/event bindings).
+- No ES modules; keep globals stable for shared pages.
+
 ---
 
 ## Quick Start (Development)
