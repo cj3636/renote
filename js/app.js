@@ -14,6 +14,7 @@ state.cards = state.cards.map(c=> ({ ...c, category_id: normalizeCategory(c.cate
 let initialSynced = false;
 
 const grid = document.getElementById('grid');
+grid?.classList.add('category-grid');
 const addBtn = document.getElementById('addCardBtn');
 const addCategoryBtn = document.getElementById('addCategoryBtn');
 const modal = document.getElementById('modal');
@@ -33,8 +34,16 @@ const categorySubtitleEl = categoryModal?.querySelector('[data-role="subtitle"]'
 const confirmModal = document.getElementById('confirmModal');
 const confirmTitleEl = confirmModal?.querySelector('[data-role="confirm-title"]');
 const confirmSubtitleEl = confirmModal?.querySelector('[data-role="confirm-subtitle"]');
+const layoutBar = document.getElementById('layoutBar');
+const layoutStatusEl = document.getElementById('layoutStatus');
+const categoryTabBar = document.getElementById('categoryTabBar');
+const layoutButtons = layoutBar?.querySelectorAll('[data-layout]');
 
-let collapsedCategories = new Set(store.get('collapsed_categories', []));
+const STACKED_COLLAPSED_KEY = 'stacked_collapsed_categories';
+const TAB_ACTIVE_KEY = 'tabbed_active_categories';
+const LEGACY_COLLAPSED_KEY = 'collapsed_categories';
+let stackedCollapsed = new Set(store.get(STACKED_COLLAPSED_KEY, store.get(LEGACY_COLLAPSED_KEY, [])));
+let tabbedActive = store.get(TAB_ACTIVE_KEY, null);
 let searchTerm = (store.get('search_term', '') || '').toLowerCase();
 if (searchInput) searchInput.value = searchTerm;
 const confirmBodyEl = confirmModal?.querySelector('[data-role="confirm-body"]');
@@ -50,12 +59,22 @@ let versionsState = { cardId:null, versions:[], selected:null };
 const flushBtn = document.getElementById('flushBtn');
 
 const CATEGORY_LAYOUTS = { HORIZONTAL:'horizontal', STACKED:'stacked' };
+let categoryLayoutMode = store.get('category_layout_mode', CATEGORY_LAYOUTS.HORIZONTAL);
 const applyCategoryLayout = (mode) => {
   const safeMode = mode === CATEGORY_LAYOUTS.STACKED ? CATEGORY_LAYOUTS.STACKED : CATEGORY_LAYOUTS.HORIZONTAL;
+  const changed = categoryLayoutMode !== safeMode;
+  categoryLayoutMode = safeMode;
   grid?.setAttribute('data-layout', safeMode);
-  try { store.set('category_layout_mode', safeMode); } catch {}
+  layoutButtons?.forEach(btn=> {
+    const active = btn.dataset.layout === safeMode;
+    btn.classList.toggle('active', active);
+    btn.setAttribute('aria-pressed', String(active));
+  });
+  if (changed) {
+    try { store.set('category_layout_mode', safeMode); } catch {}
+  }
 };
-applyCategoryLayout(store.get('category_layout_mode', CATEGORY_LAYOUTS.HORIZONTAL));
+applyCategoryLayout(categoryLayoutMode);
 
 const isCoarsePointer = window.matchMedia('(pointer: coarse)').matches;
 if (isCoarsePointer) {
@@ -120,6 +139,44 @@ const persistCategoryOrders = (catId) => {
 const resetDragMeta = () => {
   dragMeta = { dragging:null, id:null, startIndex:-1, placeholder:null, active:false, committed:false, catId:null, container:null, currentCatId:null, currentContainer:null };
 };
+const parsePx = (val='') => {
+  const num = parseFloat(String(val).replace('px',''));
+  return Number.isFinite(num) ? num : 0;
+};
+const categoryMinWidth = () => {
+  const raw = getComputedStyle(document.documentElement).getPropertyValue('--category-min');
+  return parsePx(raw) || 360;
+};
+const maxTabbedColumns = () => {
+  const width = grid?.clientWidth || window.innerWidth || categoryMinWidth();
+  return Math.max(1, Math.floor(width / Math.max(260, categoryMinWidth())));
+};
+const persistTabbedActive = () => {
+  try { store.set(TAB_ACTIVE_KEY, tabbedActive); } catch {}
+};
+const syncTabbedActive = () => {
+  const before = Array.isArray(tabbedActive) ? tabbedActive.join('|') : '';
+  const ids = categoriesList().map(c=>c.id);
+  const allowed = new Set(ids);
+  if (!Array.isArray(tabbedActive)) tabbedActive = [];
+  tabbedActive = tabbedActive.filter(id=>allowed.has(id));
+  if (!tabbedActive.length && ids.length) {
+    tabbedActive = ids.slice(0, Math.min(2, ids.length));
+  }
+  if (!tabbedActive.length && ids.length) tabbedActive = [ids[0]];
+  const after = tabbedActive.join('|');
+  if (before !== after) persistTabbedActive();
+  return allowed;
+};
+const clampActiveToMax = () => {
+  const max = maxTabbedColumns();
+  if (tabbedActive.length > max) {
+    tabbedActive = tabbedActive.slice(0, max);
+    persistTabbedActive();
+  }
+  return max;
+};
+syncTabbedActive();
 
 const uid = () => crypto.randomUUID?.() || (Date.now().toString(36)+Math.random().toString(36).slice(2));
 // Multi-line preview: take text, normalize whitespace, take first N lines/characters
@@ -156,6 +213,20 @@ const serverSaveDebounced = debounce(async (card)=> {
 let currentId = null;
 let trashArmed = false;
 
+layoutButtons?.forEach(btn => {
+  btn.addEventListener('click', ()=>{
+    const mode = btn.dataset.layout;
+    if (!mode) return;
+    applyCategoryLayout(mode);
+    render();
+  });
+});
+window.addEventListener('resize', debounce(()=>{
+  clampActiveToMax();
+  renderLayoutChrome();
+  if (categoryLayoutMode === CATEGORY_LAYOUTS.HORIZONTAL) render();
+}, 160));
+
 // ===== Drag & Drop meta =====
 let dragMeta = {
   dragging: null,           // original element
@@ -169,7 +240,7 @@ let dragMeta = {
   currentCatId: null,
   currentContainer: null
 };
-let categoryDragMeta = { active:false, section:null, placeholder:null };
+let categoryDragMeta = { active:false, section:null, placeholder:null, mode:null };
 
 function addCard(catId = ROOT_CATEGORY) {
   const categoryId = normalizeCategory(catId);
@@ -363,12 +434,55 @@ function showConfirmDialog(options = {}) {
 }
 
 // ===== Render grid =====
+const setLayoutStatus = (text='', warning=false) => {
+  if (!layoutStatusEl) return;
+  layoutStatusEl.textContent = text;
+  layoutStatusEl.classList.toggle('warning', !!warning);
+};
 function render() {
   grid.innerHTML = '';
-  categoriesList().forEach(cat => renderCategory(cat));
+  const allowed = syncTabbedActive();
+  applyCategoryLayout(categoryLayoutMode);
+  if (categoryLayoutMode === CATEGORY_LAYOUTS.STACKED) {
+    renderStackedView();
+  } else {
+    renderTabbedView();
+  }
+  renderLayoutChrome(allowed);
 }
 
-function renderCategory(cat) {
+function renderLayoutChrome(allowedSet = syncTabbedActive()) {
+  if (!layoutBar) return;
+  layoutBar.setAttribute('data-mode', categoryLayoutMode);
+  const max = clampActiveToMax();
+  renderTabBar(allowedSet, max);
+  if (categoryLayoutMode === CATEGORY_LAYOUTS.STACKED) {
+    setLayoutStatus(`Full mode - ${state.categories.length + 1} categories`, false);
+  }
+}
+
+function renderTabbedView() {
+  const cats = categoriesList();
+  const byId = Object.fromEntries(cats.map(c=>[c.id, c]));
+  const max = clampActiveToMax();
+  const visibleIds = tabbedActive.slice(0, max);
+  if (!visibleIds.length && cats.length) {
+    visibleIds.push(cats[0].id);
+    tabbedActive = [...visibleIds];
+    persistTabbedActive();
+  }
+  visibleIds.forEach(id => {
+    const cat = byId[id];
+    if (cat) renderTabbedCategory(cat);
+  });
+  setLayoutStatus(`Tabbed mode - showing ${visibleIds.length} of ${max} columns`, tabbedActive.length > max);
+}
+
+function renderStackedView() {
+  categoriesList().forEach(cat => renderStackedCategory(cat));
+}
+
+function renderStackedCategory(cat) {
   const section = document.createElement('section');
   section.className = 'category-section glass elevate';
   section.dataset.categoryId = cat.id;
@@ -381,7 +495,7 @@ function renderCategory(cat) {
     const dragHandle = document.createElement('button');
     dragHandle.className = 'icon-btn category-drag-handle';
     dragHandle.title = isCoarsePointer ? 'Drag categories from desktop; mobile coming soon' : 'Drag to reorder category';
-    dragHandle.textContent = '⇅';
+    dragHandle.textContent = '??.';
     heading.appendChild(dragHandle);
     attachCategoryDrag(section, dragHandle);
   } else {
@@ -393,12 +507,12 @@ function renderCategory(cat) {
 
   const toggle = document.createElement('button');
   toggle.className = 'category-toggle';
-  const collapsed = collapsedCategories.has(cat.id);
-  toggle.textContent = collapsed ? '▸' : '▾';
+  const collapsed = stackedCollapsed.has(cat.id);
+  toggle.textContent = collapsed ? '?-,' : '?-_';
   toggle.title = collapsed ? 'Expand category' : 'Collapse category';
   toggle.addEventListener('click', ()=>{
-    if (collapsedCategories.has(cat.id)) collapsedCategories.delete(cat.id); else collapsedCategories.add(cat.id);
-    store.set('collapsed_categories', Array.from(collapsedCategories));
+    if (stackedCollapsed.has(cat.id)) stackedCollapsed.delete(cat.id); else stackedCollapsed.add(cat.id);
+    store.set(STACKED_COLLAPSED_KEY, Array.from(stackedCollapsed));
     render();
   });
   heading.appendChild(toggle);
@@ -432,28 +546,28 @@ function renderCategory(cat) {
     const renameBtn = document.createElement('button');
     renameBtn.className = 'icon-btn';
     renameBtn.title = 'Rename category';
-    renameBtn.textContent = '✎';
+    renameBtn.textContent = '?oZ';
     renameBtn.addEventListener('click', ()=> renameCategory(cat));
     actions.appendChild(renameBtn);
 
     const moveUp = document.createElement('button');
     moveUp.className = 'icon-btn';
     moveUp.title = 'Move up';
-    moveUp.textContent = '↑';
+    moveUp.textContent = '?+`';
     moveUp.addEventListener('click', ()=> bumpCategory(cat.id, -1));
     actions.appendChild(moveUp);
 
     const moveDown = document.createElement('button');
     moveDown.className = 'icon-btn';
     moveDown.title = 'Move down';
-    moveDown.textContent = '↓';
+    moveDown.textContent = '?+"';
     moveDown.addEventListener('click', ()=> bumpCategory(cat.id, 1));
     actions.appendChild(moveDown);
 
     const delBtn = document.createElement('button');
     delBtn.className = 'icon-btn danger';
     delBtn.title = 'Delete category (only when empty)';
-    delBtn.textContent = '🗑';
+    delBtn.textContent = 'dY-`';
     delBtn.disabled = cardsInCategory(cat.id).length > 0;
     delBtn.addEventListener('click', ()=> deleteCategory(cat.id));
     actions.appendChild(delBtn);
@@ -475,6 +589,138 @@ function renderCategory(cat) {
   grid.appendChild(section);
 }
 
+function renderTabbedCategory(cat) {
+  const section = document.createElement('section');
+  section.className = 'category-section glass elevate';
+  section.dataset.categoryId = cat.id;
+
+  const header = document.createElement('div');
+  header.className = 'category-header';
+  const heading = document.createElement('div');
+  heading.className = 'category-heading';
+  if (cat.id !== ROOT_CATEGORY) {
+    const dragHandle = document.createElement('button');
+    dragHandle.className = 'icon-btn category-drag-handle';
+    dragHandle.title = isCoarsePointer ? 'Drag categories from desktop; mobile coming soon' : 'Drag to reorder column';
+    dragHandle.textContent = '??.';
+    heading.appendChild(dragHandle);
+    attachCategoryDrag(section, dragHandle);
+  } else {
+    const spacer = document.createElement('div');
+    spacer.style.width = '34px';
+    spacer.setAttribute('aria-hidden', 'true');
+    heading.appendChild(spacer);
+  }
+
+  const toggle = document.createElement('button');
+  toggle.className = 'category-toggle';
+  toggle.textContent = 'Hide';
+  toggle.title = 'Remove from tabbed view';
+  toggle.addEventListener('click', ()=>{
+    const idx = tabbedActive.indexOf(cat.id);
+    if (idx !== -1 && tabbedActive.length > 1) {
+      tabbedActive.splice(idx,1);
+      persistTabbedActive();
+      render();
+    }
+  });
+  heading.appendChild(toggle);
+
+  const title = document.createElement('div');
+  title.className = 'category-title';
+  title.textContent = (cat.name || '').trim() || (cat.id === ROOT_CATEGORY ? 'Uncategorized' : '-');
+  heading.appendChild(title);
+
+  const meta = document.createElement('div');
+  meta.className = 'category-meta';
+  const cardCount = cardsInCategoryRaw(cat.id).length;
+  const badge = document.createElement('span');
+  badge.className = 'category-badge';
+  badge.textContent = `${cardCount} card${cardCount === 1 ? '' : 's'}`;
+  meta.appendChild(badge);
+  heading.appendChild(meta);
+
+  header.appendChild(heading);
+
+  const actions = document.createElement('div');
+  actions.className = 'category-actions';
+  const addCardBtn = document.createElement('button');
+  addCardBtn.className = 'icon-btn';
+  addCardBtn.title = 'Add card to this category';
+  addCardBtn.textContent = '+';
+  addCardBtn.addEventListener('click', ()=> addCard(cat.id));
+  actions.appendChild(addCardBtn);
+
+  if (cat.id !== ROOT_CATEGORY) {
+    const renameBtn = document.createElement('button');
+    renameBtn.className = 'icon-btn';
+    renameBtn.title = 'Rename category';
+    renameBtn.textContent = '?oZ';
+    renameBtn.addEventListener('click', ()=> renameCategory(cat));
+    actions.appendChild(renameBtn);
+
+    const delBtn = document.createElement('button');
+    delBtn.className = 'icon-btn danger';
+    delBtn.title = 'Delete category (only when empty)';
+    delBtn.textContent = 'dY-`';
+    delBtn.disabled = cardsInCategory(cat.id).length > 0;
+    delBtn.addEventListener('click', ()=> deleteCategory(cat.id));
+    actions.appendChild(delBtn);
+  }
+  header.appendChild(actions);
+
+  section.appendChild(header);
+  const subGrid = document.createElement('div');
+  subGrid.className = 'grid cards-grid subgrid';
+  subGrid.dataset.categoryId = cat.id;
+  section.appendChild(subGrid);
+  renderCategoryCards(cat.id, subGrid);
+  grid.appendChild(section);
+}
+
+function renderTabBar(allowedSet = new Set(), max = clampActiveToMax()) {
+  if (!categoryTabBar) return;
+  categoryTabBar.innerHTML = '';
+  const activeSet = new Set(tabbedActive);
+  categoriesList().forEach(cat => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'tab-pill icon-btn';
+    const isActive = activeSet.has(cat.id);
+    btn.classList.toggle('active', isActive);
+    btn.setAttribute('role', 'tab');
+    btn.setAttribute('aria-pressed', String(isActive));
+    btn.dataset.categoryId = cat.id;
+    btn.textContent = cat.name || cat.id;
+    const blocked = !isActive && tabbedActive.length >= max;
+    btn.disabled = blocked && categoryLayoutMode === CATEGORY_LAYOUTS.HORIZONTAL;
+    btn.title = blocked ? `Hide a column to show ${cat.name||cat.id}` : (isActive ? 'Click to hide' : 'Click to show');
+    btn.addEventListener('click', ()=> toggleTabbedCategory(cat.id, max, allowedSet));
+    categoryTabBar.appendChild(btn);
+  });
+  categoryTabBar.classList.toggle('muted', categoryLayoutMode === CATEGORY_LAYOUTS.STACKED);
+}
+
+function toggleTabbedCategory(catId, max = clampActiveToMax(), allowedSet = syncTabbedActive()) {
+  if (!allowedSet.has(catId)) return;
+  const idx = tabbedActive.indexOf(catId);
+  if (idx !== -1) {
+    if (tabbedActive.length === 1) {
+      setLayoutStatus('At least one category must remain visible.', true);
+      return;
+    }
+    tabbedActive.splice(idx,1);
+  } else {
+    if (tabbedActive.length >= max) {
+      const name = (categoriesList().find(c=>c.id===catId)?.name) || 'this tab';
+      setLayoutStatus(`Width fits ${max} column${max===1?'':'s'}. Hide one to add ${name}.`, true);
+      return;
+    }
+    tabbedActive.push(catId);
+  }
+  persistTabbedActive();
+  render();
+}
 
 function renderCategoryCards(catId, subGrid) {
   subGrid.innerHTML = '';
@@ -602,7 +848,8 @@ function attachCategoryDrag(section, handle) {
   if (!handle || isCoarsePointer) { if (handle) handle.disabled = true; return; }
   handle.setAttribute('draggable', 'true');
   handle.addEventListener('dragstart', (e)=> {
-    categoryDragMeta = { active:true, section, placeholder: makeCategoryPlaceholder(section.getBoundingClientRect().height) };
+    const placeholder = makeCategoryPlaceholder(section.getBoundingClientRect().height);
+    categoryDragMeta = { active:true, section, placeholder, mode: categoryLayoutMode };
     section.classList.add('dragging');
     grid.insertBefore(categoryDragMeta.placeholder, section.nextSibling);
     e.dataTransfer.effectAllowed = 'move';
@@ -622,12 +869,25 @@ function handleCategoryDragOver(e) {
 
 function finalizeCategoryDrag() {
   if (!categoryDragMeta.active) return;
-  const { placeholder: ph, section } = categoryDragMeta;
+  const { placeholder: ph, section, mode } = categoryDragMeta;
   if (ph && grid.contains(ph) && section) {
     grid.insertBefore(section, ph);
   }
   ph?.remove();
   section?.classList.remove('dragging');
+  const layoutMode = mode || categoryLayoutMode;
+  if (layoutMode === CATEGORY_LAYOUTS.HORIZONTAL) {
+    const ids = [...grid.querySelectorAll('.category-section')]
+      .map(s=>s.dataset.categoryId)
+      .filter(Boolean);
+    if (ids.length) {
+      tabbedActive = ids;
+      persistTabbedActive();
+    }
+    categoryDragMeta = { active:false, section:null, placeholder:null, mode:null };
+    render();
+    return;
+  }
   const nowSec = Date.now()/1000|0;
   const ids = [...grid.querySelectorAll('.category-section')]
     .map(s=>s.dataset.categoryId)
@@ -635,7 +895,7 @@ function finalizeCategoryDrag() {
   ids.forEach((id,i)=>{ const c = state.categories.find(cat=>cat.id===id); if (c) { c.order=i; c.updated_at=nowSec; } });
   saveLocal();
   try { state.categories.forEach(c=> API.saveCategory({id:c.id, name:c.name, order:c.order})); } catch {}
-  categoryDragMeta = { active:false, section:null, placeholder:null };
+  categoryDragMeta = { active:false, section:null, placeholder:null, mode:null };
   render();
 }
 
@@ -653,7 +913,7 @@ document.addEventListener('keydown', (e)=>{
     }
     if (categoryDragMeta.active) {
       categoryDragMeta.placeholder?.remove();
-      categoryDragMeta = { active:false, section:null, placeholder:null };
+      categoryDragMeta = { active:false, section:null, placeholder:null, mode:null };
       rerender = true;
     }
     if (rerender) render();

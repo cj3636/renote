@@ -36,7 +36,17 @@ header("Content-Security-Policy: default-src 'none'; script-src 'self' 'nonce-$c
 </script>
 <div id="app">
   <?php echo file_get_contents(__DIR__ . '/inc/header.html'); ?>
-  <main class="grid" id="grid" aria-live="polite" aria-busy="false"></main>
+  <main class="category-shell">
+    <section id="layoutBar" class="category-toolbar glass elevate" aria-live="polite">
+      <div class="layout-switch" role="group" aria-label="Category layout">
+        <button type="button" class="icon-btn" data-layout="horizontal">Tabbed</button>
+        <button type="button" class="icon-btn" data-layout="stacked">Full</button>
+      </div>
+      <div id="layoutStatus" class="layout-status muted" role="status"></div>
+      <div id="categoryTabBar" class="category-tab-bar" role="tablist" aria-label="Categories"></div>
+    </section>
+    <div class="grid category-grid" id="grid" aria-live="polite" aria-busy="false"></div>
+  </main>
 </div>
 <?php echo file_get_contents(__DIR__ . '/inc/modal.html'); ?>
 <script src="js/store.js"></script>
