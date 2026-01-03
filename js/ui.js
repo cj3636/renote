@@ -112,3 +112,78 @@ window.addEventListener('resize', debounce(() => {
     if (typeof renderLayoutChrome === 'function') renderLayoutChrome();
     if (typeof render === 'function' && typeof categoryLayoutMode !== 'undefined' && categoryLayoutMode === 'horizontal') render();
 }, 160));
+
+// Primary controls
+const addBtn = document.getElementById('addCardBtn');
+addBtn?.addEventListener('click', () => {
+    if (typeof addCard === 'function' && typeof ROOT_CATEGORY !== 'undefined') addCard(ROOT_CATEGORY);
+});
+
+const addCategoryBtn = document.getElementById('addCategoryBtn');
+addCategoryBtn?.addEventListener('click', async () => {
+    if (typeof showCategoryNameDialog !== 'function' || typeof API === 'undefined') return;
+    const name = await showCategoryNameDialog({
+        title: 'New category',
+        subtitle: 'Create a new container for cards',
+        initial: ''
+    });
+    if (name === null) return;
+    const trimmed = name.trim(); if (!trimmed) return;
+    const order = (window.state?.categories?.length) || 0;
+    try {
+        const res = await API.saveCategory({ name: trimmed, order });
+        if (res && res.ok && res.category) {
+            state.categories.push(res.category);
+            if (typeof saveLocal === 'function') saveLocal();
+            if (typeof render === 'function') render();
+            if (typeof ensureCategorySelectOptions === 'function') ensureCategorySelectOptions(res.category.id);
+        } else {
+            alert(res.error || 'Create failed');
+        }
+    } catch { alert('Create failed'); }
+});
+
+const searchInput = document.getElementById('searchInput');
+searchInput?.addEventListener('input', () => {
+    if (typeof store === 'undefined') return;
+    window.searchTerm = (searchInput.value || '').toLowerCase();
+    store.set('search_term', window.searchTerm);
+    if (typeof render === 'function') render();
+});
+
+const trashBtn = document.getElementById('trashBtn');
+trashBtn?.addEventListener('click', () => {
+    if (typeof state === 'undefined') return;
+    if (!window.trashArmed) {
+        window.trashArmed = true;
+        trashBtn.innerHTML = `Delete ${window.ICONS?.TRASH || 'Trash'}`;
+        trashBtn.classList.add('danger');
+        setTimeout(() => {
+            window.trashArmed = false;
+            trashBtn.innerHTML = 'Trash';
+            trashBtn.classList.remove('danger');
+        }, 2200);
+        return;
+    }
+    const id = window.currentId;
+    const card = state.cards.find(c => c.id === id);
+    const catId = card ? (typeof normalizeCategory === 'function' ? normalizeCategory(card.category_id) : (card.category_id || 'root')) : (typeof ROOT_CATEGORY !== 'undefined' ? ROOT_CATEGORY : 'root');
+    if (typeof closeModal === 'function') closeModal();
+    state.cards = state.cards.filter(c => c.id !== id);
+    if (typeof resequenceCategory === 'function') resequenceCategory(catId);
+    if (typeof saveLocal === 'function') saveLocal();
+    if (typeof render === 'function') render();
+    if (window.API?.deleteCard) API.deleteCard(id);
+});
+
+const flushBtn = document.getElementById('flushBtn');
+flushBtn?.addEventListener('click', async () => {
+    if (!window.API?.flushOnce) return;
+    flushBtn.disabled = true;
+    try {
+        const res = await API.flushOnce();
+        const msg = `Flushed: ${res.flushed}\nUpserts: ${res.stats?.upserts || 0}\nPurges: ${res.stats?.purges || 0}\nPruned empty: ${res.stats?.skipped_empty || 0}`;
+        alert(msg);
+    } catch (e) { alert('Flush failed'); }
+    flushBtn.disabled = false;
+});

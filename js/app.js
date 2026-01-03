@@ -901,61 +901,6 @@ categorySelect?.addEventListener('change', () => {
     moveCardToCategory(card, categorySelect.value);
 });
 
-// Double-prompt trash
-trashBtn?.addEventListener('click', () => {
-    if (!trashArmed) {
-        trashArmed = true;
-        trashBtn.innerHTML = `Delete ${ICONS.TRASH}`;
-        trashBtn.classList.add('danger');
-        setTimeout(() => {
-            trashArmed = false;
-            trashBtn.innerHTML = 'Trash';
-            trashBtn.classList.remove('danger');
-        }, 2200);
-        return;
-    }
-    // Soft delete (Redis only)
-    const id = currentId;
-    const card = state.cards.find(c => c.id === id);
-    const catId = card ? normalizeCategory(card.category_id) : ROOT_CATEGORY;
-    closeModal();
-    state.cards = state.cards.filter(c => c.id !== id);
-    resequenceCategory(catId);
-    saveLocal(); render();
-    API.deleteCard(id);
-});
-
-// Add card
-addBtn?.addEventListener('click', () => {
-    addCard(ROOT_CATEGORY);
-});
-
-addCategoryBtn?.addEventListener('click', async () => {
-    const name = await showCategoryNameDialog({
-        title: 'New category',
-        subtitle: 'Create a new container for cards',
-        initial: ''
-    });
-    if (name === null) return;
-    const trimmed = name.trim(); if (!trimmed) return;
-    const order = state.categories.length;
-    try {
-        const res = await API.saveCategory({ name: trimmed, order });
-        if (res && res.ok && res.category) {
-            state.categories.push(res.category);
-            saveLocal(); render(); ensureCategorySelectOptions(res.category.id);
-        } else {
-            alert(res.error || 'Create failed');
-        }
-    } catch { alert('Create failed'); }
-});
-
-searchInput?.addEventListener('input', () => {
-    searchTerm = (searchInput.value || '').toLowerCase();
-    store.set('search_term', searchTerm);
-    render();
-});
-
 function queueServerSave(card) {
     serverSaveDebounced({ id: card.id, name: card.name || '', text: card.text, order: card.order | 0, category_id: card.category_id || ROOT_CATEGORY });
 }
@@ -963,17 +908,6 @@ function saveLocal() { store.set('cards_state', state); }
 
 // Safety net
 window.addEventListener('beforeunload', () => { try { API.bulkSave(state.cards); } catch { } });
-
-// ===== Flush & Health =====
-flushBtn?.addEventListener('click', async () => {
-    flushBtn.disabled = true;
-    try {
-        const res = await API.flushOnce();
-        const msg = `Flushed: ${res.flushed}\nUpserts: ${res.stats?.upserts || 0}\nPurges: ${res.stats?.purges || 0}\nPruned empty: ${res.stats?.skipped_empty || 0}`;
-        alert(msg);
-    } catch (e) { alert('Flush failed'); }
-    flushBtn.disabled = false;
-});
 
 // ===== History drawer =====
 historyBtn?.addEventListener('click', async () => {
