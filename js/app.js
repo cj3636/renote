@@ -51,6 +51,7 @@ if (searchInput) searchInput.value = searchTerm;
 const confirmBodyEl = confirmModal?.querySelector('[data-role="confirm-body"]');
 const confirmAcceptBtn = confirmModal?.querySelector('[data-role="confirm-accept"]');
 Object.assign(window, {
+    layoutButtons,
     categoryModal,
     categoryForm,
     categoryNameInput,
@@ -69,8 +70,6 @@ const closeHistory = document.getElementById('closeHistory');
 const historyList = document.getElementById('historyList');
 let versionsPanel = null; // dynamic container
 let versionsState = { cardId: null, versions: [], selected: null };
-
-const flushBtn = document.getElementById('flushBtn');
 
 const CATEGORY_LAYOUTS = { HORIZONTAL: 'horizontal', STACKED: 'stacked' };
 let categoryLayoutMode = store.get('category_layout_mode', CATEGORY_LAYOUTS.HORIZONTAL);
