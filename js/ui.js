@@ -96,3 +96,19 @@ function showConfirmDialog(options = {}) {
         }
     });
 }
+
+// Layout switching UI bindings (relies on globals from app.js)
+const layoutButtons = document.querySelectorAll('[data-layout]');
+layoutButtons?.forEach(btn => {
+    btn.addEventListener('click', () => {
+        const mode = btn.dataset.layout;
+        if (!mode || typeof applyCategoryLayout !== 'function') return;
+        applyCategoryLayout(mode);
+        if (typeof render === 'function') render();
+    });
+});
+window.addEventListener('resize', debounce(() => {
+    if (typeof clampActiveToMax === 'function') clampActiveToMax();
+    if (typeof renderLayoutChrome === 'function') renderLayoutChrome();
+    if (typeof render === 'function' && typeof categoryLayoutMode !== 'undefined' && categoryLayoutMode === 'horizontal') render();
+}, 160));

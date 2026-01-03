@@ -2,16 +2,16 @@
     const ICONS = {
         // Navigation & Actions
         PLUS: '+',
-        TRASH: 'dY-`‹,?',
-        FULLSCREEN_ENTER: 'ƒ>',
-        FULLSCREEN_EXIT: 'ƒ>',
+        TRASH: '🗑️',
+        FULLSCREEN_ENTER: '⛶',
+        FULLSCREEN_EXIT: '⛶',
         // Category Toggles
-        EXPAND: 'ƒ-_',
-        COLLAPSE: 'ƒ-,',
+        EXPAND: '▾',
+        COLLAPSE: '▸',
         // Reordering
-        DRAG: 'ƒ<rƒ<r',
-        UP: 'ƒ+`',
-        DOWN: 'ƒ+"',
+        DRAG: '⋮⋮',
+        UP: '↑',
+        DOWN: '↓',
     };
     // Expose on window for non-module usage
     window.ICONS = ICONS;

@@ -227,20 +227,6 @@ const serverSaveDebounced = debounce(async (card) => {
 let currentId = null;
 let trashArmed = false;
 
-layoutButtons?.forEach(btn => {
-    btn.addEventListener('click', () => {
-        const mode = btn.dataset.layout;
-        if (!mode) return;
-        applyCategoryLayout(mode);
-        render();
-    });
-});
-window.addEventListener('resize', debounce(() => {
-    clampActiveToMax();
-    renderLayoutChrome();
-    if (categoryLayoutMode === CATEGORY_LAYOUTS.HORIZONTAL) render();
-}, 160));
-
 // ===== Drag & Drop meta =====
 let dragMeta = {
     dragging: null,           // original element
