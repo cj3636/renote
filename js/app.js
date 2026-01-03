@@ -13,6 +13,8 @@ state.cards = state.cards.map(c => ({ ...c, category_id: normalizeCategory(c.cat
 // Track whether we've synced after boot so we don't show placeholder titles for long.
 let initialSynced = false;
 
+const ICONS = window.ICONS || {};
+
 const grid = document.getElementById('grid');
 grid?.classList.add('category-grid');
 const addBtn = document.getElementById('addCardBtn');
@@ -48,6 +50,18 @@ let searchTerm = (store.get('search_term', '') || '').toLowerCase();
 if (searchInput) searchInput.value = searchTerm;
 const confirmBodyEl = confirmModal?.querySelector('[data-role="confirm-body"]');
 const confirmAcceptBtn = confirmModal?.querySelector('[data-role="confirm-accept"]');
+Object.assign(window, {
+    categoryModal,
+    categoryForm,
+    categoryNameInput,
+    categoryTitleEl,
+    categorySubtitleEl,
+    confirmModal,
+    confirmTitleEl,
+    confirmSubtitleEl,
+    confirmBodyEl,
+    confirmAcceptBtn,
+});
 
 const historyBtn = document.getElementById('historyBtn');
 const drawer = document.getElementById('historyDrawer');
@@ -337,102 +351,6 @@ function ensureCategorySelectOptions(selectedId) {
     categorySelect.value = current;
 }
 
-function makePlaceholder(height = 0) {
-    const ph = document.createElement('div');
-    ph.className = 'card-placeholder';
-    ph.style.height = height ? height + 'px' : '';
-    return ph;
-}
-function makeCategoryPlaceholder(height = 0) {
-    const ph = document.createElement('div');
-    ph.className = 'category-placeholder category-section';
-    ph.style.height = height ? height + 'px' : '';
-    return ph;
-}
-
-function hideOverlay(modalEl) {
-    if (!modalEl) return;
-    modalEl.classList.add('hidden');
-    modalEl.setAttribute('aria-hidden', 'true');
-}
-
-function showCategoryNameDialog(options = {}) {
-    return new Promise(resolve => {
-        const { title = 'Category', subtitle = 'Name this category', initial = '' } = options;
-        if (!categoryModal || !categoryForm || !categoryNameInput) {
-            const fallback = prompt(title, initial);
-            resolve(fallback ? fallback.trim() : null);
-            return;
-        }
-        if (categoryTitleEl) categoryTitleEl.textContent = title;
-        if (categorySubtitleEl) categorySubtitleEl.textContent = subtitle;
-        categoryNameInput.value = initial || '';
-        categoryModal.classList.remove('hidden');
-        categoryModal.setAttribute('aria-hidden', 'false');
-        setTimeout(() => categoryNameInput.focus(), 20);
-        const closers = categoryModal.querySelectorAll('[data-close]');
-        const close = (val = null) => {
-            cleanup();
-            hideOverlay(categoryModal);
-            resolve(val);
-        };
-        const onSubmit = (e) => {
-            e.preventDefault();
-            const val = categoryNameInput.value.trim();
-            if (!val) { categoryNameInput.focus(); return; }
-            close(val);
-        };
-        const onCancel = (e) => { if (e) e.preventDefault(); close(null); };
-        const onKey = (e) => { if (e.key === 'Escape') onCancel(e); };
-        categoryForm.addEventListener('submit', onSubmit);
-        closers.forEach(el => el.addEventListener('click', onCancel));
-        document.addEventListener('keydown', onKey);
-        function cleanup() {
-            categoryForm.removeEventListener('submit', onSubmit);
-            closers.forEach(el => el.removeEventListener('click', onCancel));
-            document.removeEventListener('keydown', onKey);
-        }
-    });
-}
-
-function showConfirmDialog(options = {}) {
-    return new Promise(resolve => {
-        const { title = 'Confirm', subtitle = '', body = '', confirmText = 'Confirm', danger = false, disableAccept = false } = options;
-        if (!confirmModal || !confirmAcceptBtn) {
-            // Fallback to native confirm if modal missing
-            const ok = confirm(body || title);
-            resolve(ok);
-            return;
-        }
-        if (confirmTitleEl) confirmTitleEl.textContent = title;
-        if (confirmSubtitleEl) confirmSubtitleEl.textContent = subtitle || '';
-        if (confirmBodyEl) confirmBodyEl.textContent = body || '';
-        confirmAcceptBtn.textContent = confirmText;
-        confirmAcceptBtn.classList.toggle('danger', !!danger);
-        confirmAcceptBtn.disabled = !!disableAccept;
-        confirmModal.classList.remove('hidden');
-        confirmModal.setAttribute('aria-hidden', 'false');
-        setTimeout(() => confirmAcceptBtn.focus(), 20);
-        const closers = confirmModal.querySelectorAll('[data-close]');
-        const close = (val = false) => {
-            cleanup();
-            hideOverlay(confirmModal);
-            resolve(val);
-        };
-        const onAccept = () => { if (!confirmAcceptBtn.disabled) close(true); };
-        const onCancel = (e) => { if (e) e.preventDefault(); close(false); };
-        const onKey = (e) => { if (e.key === 'Escape') onCancel(e); };
-        confirmAcceptBtn.addEventListener('click', onAccept);
-        closers.forEach(el => el.addEventListener('click', onCancel));
-        document.addEventListener('keydown', onKey);
-        function cleanup() {
-            confirmAcceptBtn.removeEventListener('click', onAccept);
-            closers.forEach(el => el.removeEventListener('click', onCancel));
-            document.removeEventListener('keydown', onKey);
-        }
-    });
-}
-
 // ===== Render grid =====
 const setLayoutStatus = (text = '', warning = false) => {
     if (!layoutStatusEl) return;
@@ -495,7 +413,7 @@ function renderStackedCategory(cat) {
         const dragHandle = document.createElement('button');
         dragHandle.className = 'icon-btn category-drag-handle';
         dragHandle.title = isCoarsePointer ? 'Drag categories from desktop; mobile coming soon' : 'Drag to reorder category';
-        dragHandle.textContent = '≡';
+        dragHandle.textContent = ICONS.DRAG;
         heading.appendChild(dragHandle);
         attachCategoryDrag(section, dragHandle);
     } else {
@@ -508,7 +426,7 @@ function renderStackedCategory(cat) {
     const toggle = document.createElement('button');
     toggle.className = 'category-toggle';
     const collapsed = stackedCollapsed.has(cat.id);
-    toggle.textContent = collapsed ? '▸' : '▾';
+    toggle.textContent = collapsed ? ICONS.COLLAPSE : ICONS.EXPAND;
     toggle.title = collapsed ? 'Expand category' : 'Collapse category';
     toggle.addEventListener('click', () => {
         if (stackedCollapsed.has(cat.id)) stackedCollapsed.delete(cat.id); else stackedCollapsed.add(cat.id);
@@ -538,11 +456,23 @@ function renderStackedCategory(cat) {
     const addCardBtn = document.createElement('button');
     addCardBtn.className = 'icon-btn';
     addCardBtn.title = 'Add card to this category';
-    addCardBtn.textContent = '+';
+    addCardBtn.textContent = ICONS.PLUS;
     addCardBtn.addEventListener('click', () => addCard(cat.id));
     actions.appendChild(addCardBtn);
 
     if (cat.id !== ROOT_CATEGORY) {
+        const upBtn = document.createElement('button');
+        upBtn.className = 'icon-btn';
+        upBtn.title = 'Move category up';
+        upBtn.textContent = ICONS.UP;
+        upBtn.addEventListener('click', () => bumpCategory(cat.id, -1));
+
+        const downBtn = document.createElement('button');
+        downBtn.className = 'icon-btn';
+        downBtn.title = 'Move category down';
+        downBtn.textContent = ICONS.DOWN;
+        downBtn.addEventListener('click', () => bumpCategory(cat.id, 1));
+
         const renameBtn = document.createElement('button');
         renameBtn.className = 'icon-btn';
         renameBtn.title = 'Rename category';
@@ -550,19 +480,8 @@ function renderStackedCategory(cat) {
         renameBtn.addEventListener('click', () => renameCategory(cat));
         actions.appendChild(renameBtn);
 
-        const moveUp = document.createElement('button');
-        moveUp.className = 'icon-btn';
-        moveUp.title = 'Move up';
-        moveUp.textContent = '↑';
-        moveUp.addEventListener('click', () => bumpCategory(cat.id, -1));
-        actions.appendChild(moveUp);
-
-        const moveDown = document.createElement('button');
-        moveDown.className = 'icon-btn';
-        moveDown.title = 'Move down';
-        moveDown.textContent = '↓';
-        moveDown.addEventListener('click', () => bumpCategory(cat.id, 1));
-        actions.appendChild(moveDown);
+        actions.appendChild(upBtn);
+        actions.appendChild(downBtn);
 
         const delBtn = document.createElement('button');
         delBtn.className = 'icon-btn danger';
@@ -602,7 +521,7 @@ function renderTabbedCategory(cat) {
         const dragHandle = document.createElement('button');
         dragHandle.className = 'icon-btn category-drag-handle';
         dragHandle.title = isCoarsePointer ? 'Drag categories from desktop; mobile coming soon' : 'Drag to reorder column';
-        dragHandle.textContent = '≡';
+        dragHandle.textContent = ICONS.DRAG;
         heading.appendChild(dragHandle);
         attachCategoryDrag(section, dragHandle);
     } else {
@@ -647,17 +566,32 @@ function renderTabbedCategory(cat) {
     const addCardBtn = document.createElement('button');
     addCardBtn.className = 'icon-btn';
     addCardBtn.title = 'Add card to this category';
-    addCardBtn.textContent = '+';
+    addCardBtn.textContent = ICONS.PLUS;
     addCardBtn.addEventListener('click', () => addCard(cat.id));
     actions.appendChild(addCardBtn);
 
     if (cat.id !== ROOT_CATEGORY) {
+        const upBtn = document.createElement('button');
+        upBtn.className = 'icon-btn';
+        upBtn.title = 'Move category left';
+        upBtn.textContent = ICONS.UP;
+        upBtn.addEventListener('click', () => bumpCategory(cat.id, -1));
+
+        const downBtn = document.createElement('button');
+        downBtn.className = 'icon-btn';
+        downBtn.title = 'Move category right';
+        downBtn.textContent = ICONS.DOWN;
+        downBtn.addEventListener('click', () => bumpCategory(cat.id, 1));
+
         const renameBtn = document.createElement('button');
         renameBtn.className = 'icon-btn';
         renameBtn.title = 'Rename category';
         renameBtn.textContent = '✎';
         renameBtn.addEventListener('click', () => renameCategory(cat));
         actions.appendChild(renameBtn);
+
+        actions.appendChild(upBtn);
+        actions.appendChild(downBtn);
 
         const delBtn = document.createElement('button');
         delBtn.className = 'icon-btn danger';
@@ -744,7 +678,7 @@ function renderCategoryCards(catId, subGrid) {
         handle.className = 'card-handle';
         const grab = document.createElement('div');
         grab.className = 'grab';
-        grab.textContent = '≡';
+        grab.textContent = ICONS.DRAG;
         grab.title = 'Drag';
         const title = document.createElement('div');
         title.className = 'title';
@@ -942,10 +876,11 @@ function closeModal() {
 }
 backdrop?.addEventListener('click', (e) => { if (e.target.dataset.close) closeModal(); });
 closeModalBtn?.addEventListener('click', closeModal);
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !modal.classList.contains('hidden')) closeModal(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
 
 fullscreenBtn?.addEventListener('click', () => {
-    modal.classList.toggle('fullscreen');
+    editor.classList.toggle('fullscreen');
+    fullscreenBtn.textContent = editor.classList.contains('fullscreen') ? ICONS.FULLSCREEN_EXIT : ICONS.FULLSCREEN_ENTER;
 });
 
 // Save text on input
@@ -982,10 +917,15 @@ categorySelect?.addEventListener('change', () => {
 
 // Double-prompt trash
 trashBtn?.addEventListener('click', () => {
-    if (!currentId) return;
     if (!trashArmed) {
-        trashArmed = true; trashBtn.classList.add('armed');
-        setTimeout(() => { trashArmed = false; trashBtn.classList.remove('armed'); }, 2500);
+        trashArmed = true;
+        trashBtn.innerHTML = `Delete ${ICONS.TRASH}`;
+        trashBtn.classList.add('danger');
+        setTimeout(() => {
+            trashArmed = false;
+            trashBtn.innerHTML = 'Trash';
+            trashBtn.classList.remove('danger');
+        }, 2200);
         return;
     }
     // Soft delete (Redis only)
