@@ -50,7 +50,9 @@ header("Content-Security-Policy: default-src 'none'; script-src 'self' 'nonce-$c
 </div>
 <?php echo file_get_contents(__DIR__ . '/inc/modal.html'); ?>
 <script src="js/store.js"></script>
+<script src="js/icons.js" type="module"></script>
 <script src="js/app.js" type="module"></script>
+<script src="js/ui.js" type="module"></script>
 <script type="module" nonce="<?= $cspNonce ?>">
 // Manual flush button handler
 <?php if (defined('APP_DEBUG') && APP_DEBUG): ?>
