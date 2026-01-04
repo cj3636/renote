@@ -105,7 +105,7 @@
             if (typeof window.render === 'function') window.render();
         });
     });
-    window.addEventListener('resize', window.debounce(() => {
+    window.addEventListener('resize', (window.debounce || function (fn) { return fn; })(() => {
         if (typeof window.clampActiveToMax === 'function') window.clampActiveToMax();
         if (typeof window.renderLayoutChrome === 'function') window.renderLayoutChrome();
         if (typeof window.render === 'function' && typeof window.categoryLayoutMode !== 'undefined' && window.categoryLayoutMode === 'horizontal') window.render();
