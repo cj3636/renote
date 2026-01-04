@@ -6,6 +6,17 @@ namespace Renote\Command;
 
 require_once __DIR__ . '/../../src/Support/Bootstrap.php';
 
+/**
+ * Class MigrationCommand
+ * 
+ * Handles database schema migrations for the Renote application.
+ * Currently, it ensures the presence of the categories table and
+ * the category_id column in the cards table.
+ * 
+ * Additional migrations should be added as needed.
+ * 
+ * @package Renote\Command
+ */
 class MigrationCommand
 {
     public function run(): void

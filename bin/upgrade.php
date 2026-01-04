@@ -1,5 +1,11 @@
 <?php
 
+/* bin/upgrade.php
+    * This script performs an upgrade of the Renote application.
+    * It creates a backup of the current state unless the --no-backup flag is provided.
+    * It then applies any necessary database schema migrations.
+*/
+
 declare(strict_types=1);
 
 namespace Renote\Bin;
