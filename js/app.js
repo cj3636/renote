@@ -52,6 +52,16 @@ const confirmBodyEl = confirmModal?.querySelector('[data-role="confirm-body"]');
 const confirmAcceptBtn = confirmModal?.querySelector('[data-role="confirm-accept"]');
 Object.assign(window, {
     layoutButtons,
+    applyCategoryLayout,
+    clampActiveToMax,
+    renderLayoutChrome,
+    render,
+    openModal,
+    closeModal,
+    addCard,
+    moveCardToCategory,
+    saveLocal,
+    openHistoryDrawer,
     categoryModal,
     categoryForm,
     categoryNameInput,
@@ -209,6 +219,7 @@ const previewSnippet = (t, maxLines = 9, maxChars = 600) => {
     return out;
 };
 const debounce = (fn, ms = 400) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
+window.debounce = debounce;
 const serverSaveDebounced = debounce(async (card) => {
     try {
         const res = await API.saveCard(card);
